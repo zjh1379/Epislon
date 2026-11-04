@@ -20,6 +20,26 @@ def test_example_config_is_valid(monkeypatch) -> None:  # type: ignore[no-untype
     assert s.platform_aliases["aiocqhttp"] == "qq"
 
 
+def test_requirements_match_pyproject() -> None:
+    """安装脚本在可编辑安装失败时退回到 requirements.txt，两者必须一致。"""
+    import re
+
+    import pytest
+
+    tomllib = pytest.importorskip("tomllib")
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    wanted = list(project["dependencies"])
+    for extra in ("mem0", "dev"):
+        wanted += project["optional-dependencies"][extra]
+
+    def name(req: str) -> str:
+        return re.split(r"[<>=;\s\[]", req.strip(), maxsplit=1)[0].lower()
+
+    lines = [l.strip() for l in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()]
+    have = {name(l) for l in lines if l and not l.startswith("#")}
+    assert {name(r) for r in wanted} == have
+
+
 def test_env_expansion(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     cfg = tmp_path / "c.yaml"
     cfg.write_text("server:\n  admin_token: ${HER_TOKEN}\nupstream:\n  base_url: ${HER_LLM:-http://x/v1}\n", encoding="utf-8")

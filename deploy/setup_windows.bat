@@ -21,9 +21,17 @@ if not exist .venv\Scripts\python.exe (
 call .venv\Scripts\activate.bat
 
 echo [2/5] 安装依赖（含 Mem0，首次需要几分钟）
-python -m pip install --upgrade pip >nul
-pip install -e ".[dev,mem0]"
+REM 先把 setuptools 装进虚拟环境，再用 --no-build-isolation 安装：
+REM 避开 pip 的临时隔离构建环境（在部分 Windows 机器上会出现 No module named 'setuptools'）
+python -m pip install --upgrade pip setuptools wheel
 if errorlevel 1 goto :fail
+pip install --no-build-isolation -e ".[dev,mem0]"
+if errorlevel 1 (
+  echo.
+  echo [注意] 可编辑安装失败，改为只安装依赖。在项目目录里运行 python -m her_brain 不受影响。
+  pip install -r requirements.txt
+  if errorlevel 1 goto :fail
+)
 
 echo [3/5] 初始化配置与数据库
 python -m her_brain init
@@ -43,7 +51,12 @@ goto :end
 
 :fail
 echo.
-echo [失败] 上一步出错，请把上面的输出发给我。
+echo [失败] 上一步出错，请把上面的输出连同下面的环境信息一起发给我。
+echo ----- 环境信息 -----
+python --version
+python -m pip --version
+python -m pip config list
+echo TEMP=%TEMP%
 
 :end
 pause
