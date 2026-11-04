@@ -179,6 +179,29 @@ class BackupConfig(BaseModel):
     qdrant_snapshot: bool = True
 
 
+DEFAULT_CHAT_ARGS = [
+    "-ngl", "99", "-c", "16384", "-np", "2", "-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0",
+    "--jinja", "--reasoning-budget", "0", "--cache-reuse", "256", "--metrics",
+]
+DEFAULT_EMBEDDING_ARGS = ["--embedding", "-ngl", "99", "-c", "2048", "-ub", "2048"]
+
+
+class LauncherConfig(BaseModel):
+    """python -m her_brain up 使用：自动启动 llama-server。留空的项会自动检测。"""
+
+    # llama-server 可执行文件；留空时依次查找环境变量 LLAMA_SERVER、PATH、项目内与上级目录的 llama.cpp 文件夹
+    llama_server: str | None = None
+    models_dir: str = "models"
+    # 模型文件名或路径；留空时：文件名含 embed/bge 的作为嵌入模型，其余最大的 .gguf 作为对话模型
+    chat_model: str | None = None
+    embedding_model: str | None = None
+    chat_args: list[str] = Field(default_factory=lambda: list(DEFAULT_CHAT_ARGS))
+    embedding_args: list[str] = Field(default_factory=lambda: list(DEFAULT_EMBEDDING_ARGS))
+    # 加载大模型可能需要几分钟
+    start_timeout: float = 600
+    log_dir: str = "logs"
+
+
 class UserConfig(BaseModel):
     user_id: str
     display_name: str = ""
@@ -211,6 +234,7 @@ class Settings(BaseModel):
     prompt: PromptConfig = Field(default_factory=PromptConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
+    launcher: LauncherConfig = Field(default_factory=LauncherConfig)
     users: list[UserConfig] = Field(default_factory=list)
     # 扩展，形如 "her_brain.extensions.duck:DuckActionStub"
     extensions: list[str] = Field(default_factory=list)

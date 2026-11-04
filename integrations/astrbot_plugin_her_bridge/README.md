@@ -4,7 +4,13 @@
 
 ## 1. 安装插件
 
-把本目录整个复制到 AstrBot 的插件目录，并重命名为 `astrbot_plugin_her_bridge`：
+最简单的方式是让配置助手自动复制（填 AstrBot 的安装目录）：
+
+```bash
+python -m her_brain setup --astrbot D:\her\AstrBot
+```
+
+也可以手动把本目录整个复制到 AstrBot 的插件目录，并重命名为 `astrbot_plugin_her_bridge`：
 
 ```
 AstrBot/data/plugins/astrbot_plugin_her_bridge/

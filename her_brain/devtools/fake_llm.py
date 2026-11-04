@@ -192,6 +192,10 @@ def create_app(fake: FakeLLM | None = None) -> FastAPI:
     async def models():  # type: ignore[no-untyped-def]
         return {"object": "list", "data": [{"id": "fake", "object": "model"}]}
 
+    @app.get("/health")
+    async def health():  # type: ignore[no-untyped-def]
+        return {"status": "ok"}
+
     return app
 
 

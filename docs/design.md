@@ -40,6 +40,10 @@ her_brain/
 ├── proxy.py        对话主流程
 ├── services.py     装配
 ├── backup.py       快照与恢复
+├── launcher.py     一键启动（发现模型与 llama-server、等待就绪、退出时清理子进程）
+├── doctor.py       环境自检
+├── selftest.py     端到端自测（临时数据 + 真实模型）
+├── setup_wizard.py 配置助手（QQ 号、记忆引擎、AstrBot 插件）
 └── devtools/       假 LLM 服务（测试与无 GPU 联调）
 integrations/       AstrBot 插件、枫云补丁与辅助函数
 scripts/            测速基线、代理开销、记忆回归

@@ -1,7 +1,11 @@
 """命令行入口：python -m her_brain <命令>
 
-  serve      启动大脑代理
+  up         一键启动：自动找到模型与 llama-server，启动对话/嵌入服务和大脑代理
+  serve      只启动大脑代理（模型服务自行启动时使用）
   init       生成配置文件、数据目录与数据库
+  setup      配置助手：填 QQ 号、选择记忆引擎、安装 AstrBot 插件
+  doctor     环境自检
+  selftest   端到端自测（临时数据，不影响正式记忆）
   process    立即处理所有待提取的原始日志（代理未运行时使用）
   backup     生成一份快照
   restore    从快照恢复（先停止代理）
@@ -88,10 +92,24 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="her_brain", description="她的大脑代理")
     parser.add_argument("-c", "--config", help="配置文件路径（默认 config/brain.yaml 或环境变量 HER_BRAIN_CONFIG）")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    p_serve = sub.add_parser("serve", help="启动大脑代理")
+    p_up = sub.add_parser("up", help="一键启动模型服务与大脑代理")
+    p_up.add_argument("--host")
+    p_up.add_argument("--port", type=int)
+    p_up.add_argument("--no-llm", action="store_true", help="不启动对话模型（已在别处运行）")
+    p_up.add_argument("--no-embed", action="store_true", help="不启动嵌入模型")
+    p_serve = sub.add_parser("serve", help="只启动大脑代理")
     p_serve.add_argument("--host")
     p_serve.add_argument("--port", type=int)
     sub.add_parser("init", help="生成配置、数据目录与数据库")
+    p_setup = sub.add_parser("setup", help="配置助手")
+    p_setup.add_argument("--qq", help="你的 QQ 号（或 QQ 官方机器人下的用户 ID）")
+    p_setup.add_argument("--astrbot", help="AstrBot 安装目录，用于复制插件")
+    p_setup.add_argument("--docker", action="store_true", default=None, help="AstrBot 运行在 Docker 中")
+    p_setup.add_argument("--engine", choices=["mem0", "lite"], help="指定记忆引擎")
+    p_setup.add_argument("--yes", action="store_true", help="不提问，未给出的项保持不变")
+    sub.add_parser("doctor", help="环境自检")
+    p_self = sub.add_parser("selftest", help="端到端自测（需要模型服务已启动）")
+    p_self.add_argument("--keep", action="store_true", help="保留自测的临时数据目录")
     sub.add_parser("process", help="立即处理待提取的原始日志")
     sub.add_parser("backup", help="生成一份快照")
     p_restore = sub.add_parser("restore", help="从快照恢复（请先停止代理）")
@@ -106,11 +124,30 @@ def main(argv: list[str] | None = None) -> None:
         _setup_logging("INFO")
         cmd_init(args)
         return
+    if args.cmd == "setup":
+        from .setup_wizard import run_setup
+
+        sys.exit(run_setup(args.config, qq=args.qq, astrbot=args.astrbot, docker=args.docker,
+                           engine=args.engine, assume_yes=args.yes))
+    if args.cmd == "doctor":
+        from .doctor import print_report, run_doctor
+
+        sys.exit(print_report(run_doctor(args.config)))
 
     settings = load_settings(args.config)
     _setup_logging(settings.server.log_level)
 
-    if args.cmd == "serve":
+    if args.cmd == "up":
+        from .launcher import run_up
+
+        run_up(settings, chat=not args.no_llm, embedding=not args.no_embed, host=args.host, port=args.port)
+    elif args.cmd == "selftest":
+        from .selftest import run_selftest, summarize
+
+        # 自测结论逐项打印，过程日志只会干扰阅读
+        logging.disable(logging.ERROR)
+        sys.exit(summarize(asyncio.run(run_selftest(settings, keep=args.keep))))
+    elif args.cmd == "serve":
         cmd_serve(settings, args)
     elif args.cmd == "process":
         _print(asyncio.run(_with_services(settings, lambda s: s.worker.run_until_idle())))

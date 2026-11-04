@@ -74,8 +74,9 @@ embedding:
 
 memory:
   engine: mem0               # mem0（Mem0 + Qdrant）或 lite（纯 SQLite，开发/退路）
-  qdrant_url: http://127.0.0.1:6333
-  # qdrant_path: data/qdrant # 不想运行 Qdrant 服务时，可改用本地嵌入模式
+  qdrant_path: data/qdrant   # Qdrant 本地嵌入模式：不需要单独运行服务，单机推荐
+  # 改用 Qdrant 服务时，删掉上面的 qdrant_path，启用下一行
+  # qdrant_url: http://127.0.0.1:6333
   collection: her_memory
   retrieval_timeout_ms: 150  # 检索超时就只带核心档案回复
   top_k: 5
@@ -116,6 +117,19 @@ backup:
   daily_at: "04:30"
   keep_days: 14
   qdrant_snapshot: true
+
+# python -m her_brain up 自动启动 llama-server 时使用。留空的项会自动检测：
+#   llama-server：环境变量 LLAMA_SERVER → PATH → 项目内/上级目录中以 llama 开头的文件夹
+#   模型：models 目录下文件名含 embed/bge 的是嵌入模型，其余最大的 .gguf 是对话模型
+launcher:
+  models_dir: models
+  # llama_server: D:\her\llama.cpp\llama-server.exe
+  # chat_model: Qwen3-14B-Q4_K_M.gguf
+  # embedding_model: Qwen3-Embedding-0.6B-Q8_0.gguf
+  start_timeout: 600
+  # 对话服务参数：两个槽位各 8K 上下文；显存不够时把 16384 降到 12288，或换 8B 模型
+  chat_args: ["-ngl", "99", "-c", "16384", "-np", "2", "-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0",
+              "--jinja", "--reasoning-budget", "0", "--cache-reuse", "256", "--metrics"]
 
 # 扩展（下一阶段：小鸭机器人等）
 extensions: []

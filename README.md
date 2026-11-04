@@ -58,29 +58,66 @@ curl -X POST http://127.0.0.1:8000/admin/worker/run
 curl http://127.0.0.1:8000/admin/users/owner/profile
 ```
 
-## 正式部署（RTX 5070 Ti）
+## 在你的电脑上部署（Windows，RTX 5070 Ti）
 
-1. **模型服务**：下载对话模型（如 Qwen3-14B Q4_K_M）和嵌入模型（如 bge-m3），放到 `models/`，运行 `deploy/start_llama_server.bat` 和 `deploy/start_embedding_server.bat`。对话服务开两个槽位（`-np 2`），0 号给对话、1 号给后台提取，互不冲掉前缀缓存。
-2. **Qdrant**：`docker compose -f deploy/docker-compose.qdrant.yml up -d`；不想装 Docker 时，在配置中设置 `memory.qdrant_path: data/qdrant` 使用本地嵌入模式。
-3. **大脑代理**：
+### 需要下载的东西
 
-   ```bash
-   pip install -e ".[mem0]"
+| 内容 | 来源 | 放到 |
+| --- | --- | --- |
+| llama.cpp | `ggml-org/llama.cpp` Releases：`llama-b?????-bin-win-cuda-13.4-x64.zip` 和 `cudart-llama-bin-win-cuda-13.4-x64.zip`（50 系显卡要选 CUDA 13 的版本） | 两个 zip 解压到**同一个**文件夹，文件夹名以 `llama` 开头，放在项目目录或它的上级目录 |
+| 对话模型 | Hugging Face `Qwen/Qwen3-14B-GGUF` → `Qwen3-14B-Q4_K_M.gguf`（约 9 GB） | 项目的 `models\` |
+| 嵌入模型 | Hugging Face `Qwen/Qwen3-Embedding-0.6B-GGUF` → `Qwen3-Embedding-0.6B-Q8_0.gguf`（约 0.6 GB） | 项目的 `models\` |
+
+```
+D:\her\
+├─ llama.cpp\                     llama-server.exe 和 cudart 的 dll
+└─ Epislon\
+   ├─ models\                     两个 .gguf
+   └─ deploy\setup_windows.bat    ……
+```
+
+不需要 Docker 和 Qdrant 服务：默认使用 Qdrant 本地嵌入模式（`data\qdrant`）。
+
+### 三步完成
+
+1. **安装**：双击 `deploy\setup_windows.bat`。它会创建虚拟环境、安装依赖、生成配置，然后问你 QQ 号、AstrBot 安装目录（会自动复制插件）和 AstrBot 是否在 Docker 里，最后做一次环境自检。
+2. **启动**：双击 `deploy\up.bat`。它会自动找到 `models\` 里的模型和 llama-server，依次启动对话模型、嵌入模型和大脑代理；按 Ctrl+C 一并关闭。服务已在运行时会跳过，所以也可以自己先启动 llama-server。
+3. **自测**：另开一个窗口双击 `deploy\selftest.bat`。它在临时目录里用你的真实模型把整个流程跑一遍，不会写入正式记忆：
+
+   ```
+   [通过] 上游连通 / 嵌入服务 / 原始日志与私密度
+   [通过] 后台提取：……小明在 2026-11-04 要去面试……；小明对花生过敏
+   [通过] 时效记忆（面试） / 核心档案（明确要求记住）
+   [通过] 跨入口（QQ → 语音） / 场合过滤（群聊） / 场合过滤（未确认身份的语音）
+   [通过] 语音回复：「欢迎回来！面试怎么样？」
+   [通过] 代理准备耗时 / 记忆检索耗时 / 首字时间
    ```
 
-   ```bash
-   python -m her_brain init
-   ```
+然后在 AstrBot 里新增“OpenAI 兼容”提供商（`setup` 最后会打印要填的地址、Key 和模型名），给机器人发条私聊，再运行一次自检。看到“AstrBot 接入：已收到 QQ 消息……owner”就说明接通了：
 
-   编辑 `config/brain.yaml`（绑定你的 QQ 号、模型名），编辑 `persona/her.yaml`（她的人设），然后运行 `deploy/start_brain.bat`。
-4. **测速基线**（实施步骤 1）：
+```bash
+python -m her_brain doctor
+```
+
+| 命令 | 作用 |
+| --- | --- |
+| `python -m her_brain setup` | 配置助手（可重复运行；`--qq`、`--astrbot`、`--docker`、`--engine`、`--yes`） |
+| `python -m her_brain doctor` | 环境自检：依赖、配置、模型、llama-server、显卡、各服务、嵌入维度、AstrBot 是否接入 |
+| `python -m her_brain up` | 一键启动（`--no-llm` / `--no-embed` 跳过某个模型服务） |
+| `python -m her_brain selftest` | 端到端自测（`--keep` 保留临时数据以便排查） |
+
+想手动控制 llama-server 参数时，仍可用 `deploy\start_llama_server.bat` 和 `deploy\start_embedding_server.bat`，或在配置的 `launcher` 段里修改。对话服务开两个槽位（`-np 2`），0 号给对话、1 号给后台提取，互不冲掉前缀缓存。
+
+### 其他测量
+
+1. **测速基线**（实施步骤 1）：
 
    ```bash
    python scripts/bench_baseline.py --llm http://127.0.0.1:8080/v1 --embed http://127.0.0.1:8081/v1 --tts "http://127.0.0.1:9880/tts?text={text}&text_lang=zh&ref_audio_path=ref.wav&prompt_lang=zh&prompt_text=参考文本&streaming_mode=true"
    ```
 
-5. **接入入口**：按 [AstrBot](integrations/astrbot_plugin_her_bridge/README.md) 和 [枫云](integrations/fengyun/README.md) 的说明操作。
-6. **代理开销**（实施步骤 3/4）：
+2. **接入入口**：按 [AstrBot](integrations/astrbot_plugin_her_bridge/README.md) 和 [枫云](integrations/fengyun/README.md) 的说明操作。
+3. **代理开销**（实施步骤 3/4）：
 
    ```bash
    python scripts/bench_proxy.py --key sk-her-astrbot --user 你的QQ号
