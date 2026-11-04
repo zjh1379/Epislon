@@ -162,3 +162,17 @@ class Mem0Index:
 
     async def close(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)
+        # Mem0 的 close() 只关自己的 SQLite；Qdrant 客户端若留到解释器退出时由 __del__ 清理，
+        # 会打印 “sys.meta_path is None” 之类的报错（本地嵌入模式下还会晚释放文件锁）
+        for store in (getattr(self.memory, "vector_store", None), getattr(self.memory, "_entity_store", None)):
+            client = getattr(store, "client", None)
+            if client is not None and hasattr(client, "close"):
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001
+                    log.debug("关闭 Qdrant 客户端失败", exc_info=True)
+        if hasattr(self.memory, "close"):
+            try:
+                self.memory.close()
+            except Exception:  # noqa: BLE001
+                log.debug("关闭 Mem0 失败", exc_info=True)

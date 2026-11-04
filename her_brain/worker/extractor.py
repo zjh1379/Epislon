@@ -20,6 +20,7 @@ from ..memory.models import KINDS, Fact
 from ..memory.rawlog import RawLog
 from ..memory.recent import channel_label
 from ..prompt.persona import PersonaHolder
+from ..textutil import STOP_BIGRAMS, token_set
 from ..timeutil import format_stamp, get_tz
 
 log = logging.getLogger(__name__)
@@ -58,6 +59,8 @@ SYSTEM_TEMPLATE = """你是记忆整理助手。下面是“{her}”和“{user}
    并在 text 里写成具体日期，例如“{user}在 2026-11-05 有一场面试”。
 4. 忽略寒暄、客套和没有信息量的内容。{her}的一般性回复不要提取；
    只有当{her}说到关于她自己的新设定、经历、承诺时才提取，about 填 "self"。
+   关于对方的事实要直接陈述对方本人的情况，例如“{user}对花生过敏”，
+   不要写成“{her}知道……”“{user}告诉{her}……”。
 5. 字段说明：
    - about：关于对方填 "user"，关于{her}自己填 "self"
    - kind：attribute 稳定属性（名字、生日、职业、住在哪、家人、宠物等）| preference 喜好或厌恶 |
@@ -67,7 +70,9 @@ SYSTEM_TEMPLATE = """你是记忆整理助手。下面是“{her}”和“{user}
    - value：slot 不为空时填简短取值（例如“杭州”），否则填空字符串
    - date：事件或计划的日期，没有就填空字符串
    - importance：1~5。5=健康、重大人生事件、对方明确要求记住；4=重要计划或强烈情绪；3=一般个人信息；1~2=琐事
-   - explicit：对方是否明确要求你记住（“记住”“别忘了”“帮我记着”）
+     健康相关（过敏、疾病、忌口、长期用药）一律是 attribute，importance 填 5
+   - explicit：只有对方在**这件事所在的那句话里**明确要求你记住（“记住”“别忘了”“帮我记着”）才填 true；
+     同一段对话里的其他事实一律填 false
 6. 没有值得记住的内容时返回 {{"facts": []}}。
 
 只输出 JSON：{{"facts": [...]}}"""
@@ -114,6 +119,38 @@ class MemoryExtractor:
         facts = parse_facts(text)
         log.info("从 %d 条日志中提取到 %d 条事实", len(logs), len(facts))
         return facts
+
+
+REMEMBER_RE = re.compile(r"记住|记得|别忘|不要忘|帮我记|记一下|记下来|记着")
+
+
+def attribute_sources(facts: list[Fact], logs: list[RawLog]) -> list[tuple[Fact, list[str]]]:
+    """把每条事实归到最相关的那条（或几条）日志上，并纠正模型对 explicit 的误标。
+
+    - 来源追溯精确到具体那句话，而不是整批日志；
+    - 只有归属的那句话里真的有“记住/别忘了”等字眼，explicit 才保留为 true。
+      模型常把同一段对话里的所有事实都标成 explicit，会让没被要求记住的事绕过“多次确认”直接进入核心档案。
+    """
+    all_ids = [entry.log_id for entry in logs]
+    out: list[tuple[Fact, list[str]]] = []
+    for fact in facts:
+        fact_tokens = token_set(fact.text) - STOP_BIGRAMS
+        scores: list[tuple[int, RawLog]] = []
+        for entry in logs:
+            text = entry.user_text if fact.about == "user" else f"{entry.user_text} {entry.reply_text}"
+            scores.append((len(fact_tokens & (token_set(text) - STOP_BIGRAMS)), entry))
+        best = max((s for s, _ in scores), default=0)
+        matched = [entry for s, entry in scores if best > 0 and s == best]
+        if matched:
+            sources = [entry.log_id for entry in matched]
+            said = " ".join(entry.user_text for entry in matched)
+        else:
+            sources = all_ids
+            said = " ".join(entry.user_text for entry in logs)
+        if fact.explicit and not REMEMBER_RE.search(said):
+            fact = fact.model_copy(update={"explicit": False})
+        out.append((fact, sources))
+    return out
 
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.M)

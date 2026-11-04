@@ -83,6 +83,23 @@ async def test_mem0_add_search_privacy_and_versions(mem0_services) -> None:  # t
     assert mem0_services.index.memory.get(rec.memory_id)["memory"] == "小明最近在准备考研"
 
 
+async def test_mem0_close_releases_qdrant_lock(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """回归：Mem0 的 close() 不关 Qdrant 客户端。本地嵌入模式的文件锁会一直占着（同一目录无法再打开），
+    并且要等解释器退出时由 __del__ 释放，在 Windows 上打印 “Exception ignored in QdrantClient.__del__”。"""
+    from her_brain.config import Settings
+    from her_brain.memory.episodic.mem0_index import Mem0Index, build_mem0_config
+
+    (tmp_path / "data").mkdir()
+    s = Settings.model_validate({"data_dir": str(tmp_path / "data"), "embedding": {"enabled": True},
+                                 "memory": {"engine": "mem0", "qdrant_path": str(tmp_path / "q")}})
+    first = Mem0Index(build_mem0_config(s))
+    with pytest.raises(RuntimeError, match="already accessed"):
+        Mem0Index(build_mem0_config(s))  # 未关闭时目录被锁
+    await first.close()
+    second = Mem0Index(build_mem0_config(s))  # 关闭后可以重新打开
+    await second.close()
+
+
 async def test_mem0_reindex_from_sqlite(mem0_services) -> None:  # type: ignore[no-untyped-def]
     ep = mem0_services.episodic
     _, rec = await ep.remember("owner", Fact(text="小明养了一只猫叫团子"), PRIVATE, ["l1"])

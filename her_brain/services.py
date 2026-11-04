@@ -94,6 +94,13 @@ class Services:
             log.info("静态前缀已预热")
         return ok
 
+    async def warmup_memory(self) -> None:
+        """第一次检索要建嵌入连接、加载向量集合，可能超过 150ms 上限。启动时先空跑一次。"""
+        try:
+            await self.episodic.search([self.settings.self_user_id], "你好", {"public"}, 1)
+        except Exception as exc:  # noqa: BLE001 - 预热失败不影响服务
+            log.debug("记忆检索预热失败：%s", exc)
+
     def spawn(self, coro: object) -> None:
         task = asyncio.ensure_future(coro)  # type: ignore[arg-type]
         self._bg.add(task)
@@ -103,6 +110,7 @@ class Services:
         await self.extensions.startup(self)
         if run_worker and self.settings.worker.enabled:
             self.worker.start()
+        self.spawn(self.warmup_memory())
         if self.settings.upstream.warmup:
             self.spawn(self.warmup())
 

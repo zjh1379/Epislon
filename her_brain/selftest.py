@@ -95,6 +95,7 @@ async def run_selftest(settings: Settings, *, transports: Any = None, keep: bool
     app.state.services = svc
     tz = get_tz(test_settings.prompt.timezone)
     try:
+        await svc.warmup_memory()  # 与正式启动一致：先预热检索，避免把冷启动算进延迟
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://selftest",
                                      timeout=600) as client:
 
@@ -154,7 +155,11 @@ async def run_selftest(settings: Settings, *, transports: Any = None, keep: bool
             elapsed = time.perf_counter() - t0
             counts = svc.rawlog.counts()
             mems = svc.episodic.list_for_user("tester")
-            listing = "；".join(f"{m.kind}{'@' + m.event_date if m.event_date else ''} {m.text}" for m in mems) or "（无）"
+            self_mems = svc.episodic.list_for_user(test_settings.self_user_id)
+            listing = "；".join(
+                f"{'（关于她）' if m.user_id != 'tester' else ''}{m.kind}{'@' + m.event_date if m.event_date else ''} {m.text}"
+                for m in [*mems, *self_mems]
+            ) or "（无）"
             if counts["failed"] or svc.worker.last_error:
                 report("fail", "后台提取", f"{svc.worker.last_error or ''} 日志状态 {counts}")
             else:
@@ -173,6 +178,9 @@ async def run_selftest(settings: Settings, *, transports: Any = None, keep: bool
             else:
                 cands = [c["text"] for c in svc.promoter.list("tester")]
                 report("fail", "核心档案（明确要求记住）", f"档案里没有花生过敏；候选：{cands or '无'}")
+            unconfirmed = [t for t in profile if "面试" in t]
+            report("fail" if unconfirmed else "ok", "核心档案（未确认的事实不进入）",
+                   f"只提过一次、没要求记住的事进了档案：{unconfirmed}" if unconfirmed else "只提过一次的面试没有进入档案")
 
             # 4. 跨入口与场合过滤
             voice_ctx = await prompt_for("我回来了", VOICE)

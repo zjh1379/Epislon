@@ -17,6 +17,7 @@ from ..memory.models import Fact
 from ..memory.rawlog import DONE, SKIPPED, RawLog
 from ..timeutil import get_tz, local_date, now
 from .activity import Preempted
+from .extractor import attribute_sources
 
 if TYPE_CHECKING:
     from ..services import Services
@@ -153,13 +154,14 @@ class BackgroundWorker:
     async def _apply(self, logs: list[RawLog], facts: list[Fact], user_id: str) -> None:
         ids = [entry.log_id for entry in logs]
         privacy = logs[0].privacy
-        created_at = logs[-1].created_at
+        by_id = {entry.log_id: entry for entry in logs}
         self_id = self.s.settings.self_user_id
-        for fact in facts:
+        for fact, sources in attribute_sources(facts, logs):
             target = self_id if fact.about == "self" else user_id
-            status, _ = await self.s.episodic.remember(target, fact, privacy, ids, created_at=created_at)
+            created_at = max(by_id[s].created_at for s in sources)
+            status, _ = await self.s.episodic.remember(target, fact, privacy, sources, created_at=created_at)
             self.stats[f"memory_{status}"] += 1
-            result = self.s.promoter.observe(target, fact, privacy, ids)
+            result = self.s.promoter.observe(target, fact, privacy, sources)
             if result is not None and result.promoted:
                 self.stats["profile_promoted"] += 1
                 if result.superseded_slot:

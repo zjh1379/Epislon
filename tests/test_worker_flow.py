@@ -207,6 +207,53 @@ async def test_worker_marks_guests_skipped_when_disabled(make_settings, fake: Fa
         await svc.close()
 
 
+def test_attribute_sources_and_explicit_guard() -> None:
+    from her_brain.memory.models import Fact
+    from her_brain.memory.rawlog import RawLog
+    from her_brain.worker.extractor import attribute_sources
+
+    logs = [
+        RawLog("l1", "u", "qq", "private", "private", "我明天要去面试，有点紧张", "加油呀", 1.0),
+        RawLog("l2", "u", "qq", "private", "private", "记住，我对花生过敏", "好的我记住了", 2.0),
+        RawLog("l3", "u", "qq", "private", "private", "你喜欢什么", "我最近在学画画", 3.0),
+    ]
+    facts = [
+        Fact(text="小明在 2026-11-05 有一场面试", kind="plan", explicit=True),  # 模型误标
+        Fact(text="小E知道小明对花生过敏", kind="preference", explicit=True),
+        Fact(text="小E最近在学画画", about="self"),
+        Fact(text="完全无关的一句话XYZ"),
+    ]
+    out = attribute_sources(facts, logs)
+    assert out[0][1] == ["l1"] and out[0][0].explicit is False
+    assert out[1][1] == ["l2"] and out[1][0].explicit is True
+    assert out[2][1] == ["l3"]  # 关于她自己的事实按她的回复归属
+    assert out[3][1] == ["l1", "l2", "l3"]  # 找不到归属时退回整批
+
+
+async def test_sloppy_explicit_labels_do_not_bypass_confirmation(client: httpx.AsyncClient, services, fake: FakeLLM) -> None:  # type: ignore[no-untyped-def]
+    """回归：真实模型把同一段对话里的所有事实都标成 explicit，曾让面试计划直接进入核心档案。"""
+    from her_brain.devtools.fake_llm import default_extract
+
+    def sloppy(messages):  # type: ignore[no-untyped-def]
+        facts = default_extract(messages)
+        for f in facts:
+            f["explicit"] = True
+            if "过敏" in f["text"]:
+                f["text"] = "小E知道" + f["text"]
+        return facts
+
+    fake.extract_fn = sloppy
+    await client.post("/v1/chat/completions", json=chat_body("我明天要去面试，有点紧张", metadata=QQ_PRIVATE))
+    await client.post("/v1/chat/completions", json=chat_body("记住，我对花生过敏", metadata=QQ_PRIVATE))
+    await services.worker.run_until_idle()
+    texts = [e.text for e in services.profiles.get("owner").entries]
+    assert any("花生过敏" in t for t in texts)
+    assert not any("面试" in t for t in texts)
+    interview = next(m for m in services.episodic.list_for_user("owner") if "面试" in m.text)
+    log_ids = {log["user_text"]: log["log_id"] for log in services.rawlog.list(user_id="owner")}
+    assert interview.source_log_ids == [log_ids["我明天要去面试，有点紧张"]]  # 来源精确到那一句
+
+
 def test_extractor_parsing() -> None:
     from her_brain.worker.extractor import FACT_SCHEMA, parse_facts
 
