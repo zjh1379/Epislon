@@ -1,0 +1,28 @@
+--- a/llm.py
++++ b/llm.py
+@@ -242,7 +242,11 @@
+                 messages.extend(openai_history)
+                 completion = client.chat.completions.create(
+                     model=custom_llm_model, messages=messages,
+-                    extra_body={"thinking": {"type": "disabled"}, "enable_thinking": False})
++                    extra_body={"thinking": {"type": "disabled"}, "enable_thinking": False,
++                                # 大脑代理：告诉代理“谁在什么场合说话”，代理读取后剥离，不会传给模型
++                                "metadata": {"channel": "voice", "scene": "voice", "external_user_id": "owner",
++                                             "user_name": username,
++                                             "speaker_verified": voiceprint_switch == "开启"}})
+                 openai_history.append({"role": "assistant", "content": completion.choices[0].message.content})
+                 res = completion.choices[0].message.content
+                 if think_filter_switch == "开启":
+--- a/function.py
++++ b/function.py
+@@ -144,7 +144,9 @@
+             client = OpenAI(base_url=custom_llm_url, api_key=custom_llm_key)
+             completion = client.chat.completions.create(model=custom_llm_model, messages=messages,
+                                                         extra_body={"thinking": {"type": "disabled"},
+-                                                                    "enable_thinking": False})
++                                                                    "enable_thinking": False,
++                                                                    # 大脑代理：工具类调用原样透传，不注入人设、不记录
++                                                                    "metadata": {"mode": "raw"}})
+         else:
+             return f"[{llm_menu.get()}未适配{mode_menu.get()}，可选择其他对话模型]"
+         res = completion.choices[0].message.content

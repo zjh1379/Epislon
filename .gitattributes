@@ -1,0 +1,5 @@
+# 枫云源码使用 CRLF 换行，补丁需按字节原样保存才能 git apply
+*.patch -text
+
+# Windows 批处理使用 CRLF
+*.bat text eol=crlf

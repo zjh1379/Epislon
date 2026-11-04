@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "her-brain"
+version = "0.1.0"
+description = "她的大脑代理：为 AstrBot 与枫云 AI 提供统一人设、长期记忆与低延迟转发的 OpenAI 兼容服务"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "PyYAML>=6.0",
+    "tzdata; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+mem0 = ["mem0ai>=2.0", "qdrant-client>=1.9"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+her-brain = "her_brain.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["her_brain*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -1,0 +1,60 @@
+# 记忆回归测试集示例。复制为 cases.yaml，按你们的真实对话内容写 30~50 条。
+#
+# 每条用例：
+#   ask:       要问的话
+#   metadata:  覆盖 defaults 中的入口/场景/身份（语音用例记得写 external_user_id: owner，
+#              否则会继承默认的 QQ 号而被当成访客）
+#   context 模式（检查组装出的提示词）：context_all / context_any / forbid_context
+#   reply 模式（检查她的真实回复）：    reply_all / reply_any / forbid_reply
+#
+# 建议覆盖四类：
+#   1. 记得住：核心档案里的稳定事实（名字、生日、过敏、宠物……）
+#   2. 记得对：改过的事实应该是新值（例如搬家后的城市）
+#   3. 不串场合：群聊、未确认身份的语音里不出现私密内容
+#   4. 跨入口：在 QQ 说的事，语音里也知道
+
+defaults:
+  metadata:
+    channel: qq
+    scene: private
+    external_user_id: "123456"     # 改成你的 QQ 号
+
+cases:
+  # ---- 1. 记得住
+  - id: allergy
+    ask: 晚上点外卖吃什么好
+    context_any: [过敏]
+    reply_any: [过敏, 花生]
+
+  - id: pet-name
+    ask: 我家猫今天又捣乱了
+    context_all: [团子]
+
+  - id: birthday
+    ask: 你还记得我生日吗
+    context_any: [生日]
+
+  # ---- 2. 记得对（旧值应被标记过时或已从档案中替换）
+  - id: city-updated
+    ask: 最近天气怎么样
+    context_all: [上海]
+    forbid_context: [杭州]
+
+  # ---- 3. 不串场合
+  - id: group-privacy
+    ask: 最近怎么样
+    metadata: {scene: group, group_id: "7890"}
+    forbid_context: [过敏, 看心理医生]
+    forbid_reply: [过敏, 心理医生]
+
+  - id: unverified-voice
+    ask: 你知道主人的事吗
+    metadata: {channel: voice, scene: voice, external_user_id: owner, speaker_verified: false}
+    forbid_context: [过敏, 团子]
+
+  # ---- 4. 跨入口
+  - id: voice-knows-qq
+    ask: 我回来了
+    metadata: {channel: voice, scene: voice, external_user_id: owner, speaker_verified: true}
+    context_any: [面试]
+    reply_any: [面试]
