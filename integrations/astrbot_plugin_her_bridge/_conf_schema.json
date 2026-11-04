@@ -1,0 +1,20 @@
+{
+  "enabled_provider_ids": {
+    "description": "只在使用这些提供商 ID 时附加元数据",
+    "type": "list",
+    "hint": "填大脑代理对应的提供商 ID。留空表示所有提供商都附加（若同时使用云端模型，建议填写，避免把 QQ 号等信息发给第三方）。",
+    "default": []
+  },
+  "platform_aliases": {
+    "description": "平台名映射（JSON）",
+    "type": "string",
+    "hint": "把 AstrBot 的平台适配器名映射成大脑代理里的入口名，例如 {\"aiocqhttp\": \"qq\"}。已内置 QQ 相关映射。",
+    "default": ""
+  },
+  "send_group_name": {
+    "description": "附带群名称",
+    "type": "bool",
+    "hint": "让她知道当前在哪个群里说话。",
+    "default": true
+  }
+}

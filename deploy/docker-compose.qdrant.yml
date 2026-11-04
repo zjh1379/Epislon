@@ -1,0 +1,13 @@
+# Qdrant 向量库（Mem0 情节记忆的存储）。
+# 启动：docker compose -f deploy/docker-compose.qdrant.yml up -d
+# 不想用 Docker：可以下载 Qdrant 的 Windows 可执行文件直接运行，
+# 或在 brain.yaml 中设置 memory.qdrant_path 使用本地嵌入模式（无需任何服务）。
+# 建议把镜像标签固定为部署时的具体版本号。
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - ../data/qdrant_storage:/qdrant/storage

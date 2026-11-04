@@ -1,0 +1,122 @@
+# 大脑代理配置示例。复制为 config/brain.yaml 后修改。
+# 字符串里可以用 ${ENV_NAME} 或 ${ENV_NAME:-默认值} 引用环境变量。
+# 相对路径相对于启动目录（项目根目录）。
+
+data_dir: data
+persona_path: persona/her.yaml
+
+server:
+  host: 127.0.0.1
+  port: 8000
+  model_name: her            # 两个入口里填的模型名
+  admin_token: ""            # 留空时管理接口只允许本机访问
+  log_level: INFO
+
+# 入口 API Key（可选）。配置后未登记的 Key 会被拒绝。
+# 当入口无法附带元数据时，代理会用 Key 区分入口；mode: raw 表示原样透传、不注入人设。
+api_keys:
+  - key: sk-her-astrbot
+    channel: qq
+    name: AstrBot
+  - key: sk-her-fengyun
+    channel: voice
+    scene: voice
+    name: 枫云 AI
+
+# 平台名映射（AstrBot 的平台适配器名 → 统一的入口名）
+platform_aliases:
+  aiocqhttp: qq
+  qq_official: qq
+
+# 登记的用户：不同平台的身份映射到同一个人
+users:
+  - user_id: owner
+    display_name: 主人      # 改成你希望她称呼你的名字
+    role: owner
+    bindings:
+      - qq:123456           # 你的 QQ 号
+      - voice:owner         # 枫云语音（声纹确认后）
+
+# 对话模型（llama-server）
+upstream:
+  base_url: http://127.0.0.1:8080/v1
+  api_key: sk-no-key
+  model: qwen3-14b
+  timeout: 120
+  connect_timeout: 3
+  slot_id: 0                 # 对话固定用 0 号槽位（llama-server 需 -np 2），前缀缓存不会被后台任务冲掉
+  disable_thinking: true     # 陪伴聊天关闭思考模式
+  strip_think: true          # 兜底过滤 <think>…</think>
+  warmup: true               # 启动/重载人设/后台任务后预热静态前缀
+  default_params:
+    temperature: 0.7
+    top_p: 0.8
+  scene_params:
+    voice:
+      max_tokens: 200        # 语音回复要短，减少生成时间
+    group:
+      max_tokens: 200
+
+# 后台提取用的模型（未填写的字段沿用 upstream）
+worker_llm:
+  slot_id: 1
+  temperature: 0.1
+  max_tokens: 1024
+  json_mode: json_schema     # llama-server 支持用 JSON Schema 约束输出
+
+# 嵌入模型（mem0 引擎必需；lite 引擎可选）
+embedding:
+  enabled: true
+  base_url: http://127.0.0.1:8081/v1
+  model: bge-m3
+  dims: 1024
+  timeout: 2
+
+memory:
+  engine: mem0               # mem0（Mem0 + Qdrant）或 lite（纯 SQLite，开发/退路）
+  qdrant_url: http://127.0.0.1:6333
+  # qdrant_path: data/qdrant # 不想运行 Qdrant 服务时，可改用本地嵌入模式
+  collection: her_memory
+  retrieval_timeout_ms: 150  # 检索超时就只带核心档案回复
+  top_k: 5
+  agenda_days_back: 2        # 日期在前后几天内的计划/事件会被主动带上
+  agenda_days_ahead: 2
+  remember_guests: true
+  trust_unverified_voice: false   # 声纹未确认的语音按匿名访客处理
+  profile:
+    confirmations_to_promote: 2   # 被独立提到 2 次才进核心档案（说“记住”的立即进入）
+    match_threshold: 0.55
+    plan_expire_days: 3
+    candidate_expire_days: 90
+  recent:
+    window_hours: 12
+    max_items: 4
+    max_chars: 60
+  mem0: {}                   # 深度合并进生成的 Mem0 配置，可覆盖任意字段
+
+prompt:
+  dynamic_position: system   # system（文档默认）或 before_last_user（让历史对话也命中缓存）
+  entry_system_prompt: append
+  max_profile_chars: 800
+  max_memory_chars: 900
+  timezone: Asia/Shanghai
+  keep_last_messages: 0      # 只保留入口传来的最近 N 条消息，0 为不限制
+
+worker:
+  enabled: true
+  idle_seconds: 90           # 空闲多久后才开始提取记忆
+  poll_seconds: 5
+  batch_size: 8
+  max_attempts: 3
+  tidy_interval_hours: 6
+
+backup:
+  enabled: true
+  dir: backups
+  daily_at: "04:30"
+  keep_days: 14
+  qdrant_snapshot: true
+
+# 扩展（下一阶段：小鸭机器人等）
+extensions: []
+#  - her_brain.extensions.duck:DuckActionStub

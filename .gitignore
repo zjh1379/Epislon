@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# 运行时数据：记忆、日志、快照都只在本机
+data/
+backups/
+logs/
+models/
+
+# 本地配置（可能含密钥）；示例配置 config/brain.example.yaml 会被提交
+config/brain.yaml
+
+# 回归测试的真实用例与结果（含个人信息）
+regression/cases.yaml
+regression/*.result.json
