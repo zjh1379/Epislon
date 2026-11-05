@@ -10,6 +10,15 @@
 python -m her_brain setup --astrbot D:\her\AstrBot
 ```
 
+AstrBot 的插件目录位置取决于安装方式：
+
+| 安装方式 | 插件目录 |
+| --- | --- |
+| 桌面客户端版 | `C:\Users\<用户名>\.astrbot\data\plugins`（与安装目录无关；设置了环境变量 `ASTRBOT_ROOT` 时为 `%ASTRBOT_ROOT%\data\plugins`） |
+| 源码 / 一键安装包 / Docker | AstrBot 运行目录（Docker 为挂载的目录）下的 `data\plugins` |
+
+配置助手会自动处理客户端版：填安装目录时，会去用户目录下的 `.astrbot` 里找。
+
 也可以手动把本目录整个复制到 AstrBot 的插件目录，并重命名为 `astrbot_plugin_her_bridge`：
 
 ```

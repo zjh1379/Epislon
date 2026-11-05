@@ -286,6 +286,31 @@ def test_setup_wizard(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-u
     assert run_setup(str(cfg), assume_yes=True, printer=out.append) == 0
 
 
+def test_install_plugin_desktop_client(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """AstrBot 桌面客户端版：安装目录（F:\\APP\\AstrBot）里没有 data，数据在 ~/.astrbot/data。"""
+    from her_brain.doctor import _check_desktop_plugin
+    from her_brain.setup_wizard import install_plugin
+
+    home = tmp_path / "home"
+    (home / ".astrbot" / "data").mkdir(parents=True)
+    install_dir = tmp_path / "APP" / "AstrBot"
+    install_dir.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("ASTRBOT_ROOT", raising=False)
+
+    assert _check_desktop_plugin()[0].status == "warn"  # 还没装
+    dest = install_plugin(install_dir)
+    assert dest == home / ".astrbot" / "data" / "plugins" / "astrbot_plugin_her_bridge"
+    assert (dest / "main.py").exists() and (dest / "metadata.yaml").exists()
+    assert _check_desktop_plugin()[0].status == "info"
+    # ASTRBOT_ROOT 优先
+    custom = tmp_path / "custom_root"
+    (custom / "data").mkdir(parents=True)
+    monkeypatch.setenv("ASTRBOT_ROOT", str(custom))
+    assert install_plugin(install_dir).parent == custom / "data" / "plugins"
+
+
 # ---------------------------------------------------------------------- 端到端自测
 
 

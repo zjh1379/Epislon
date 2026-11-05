@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import shutil
 from collections.abc import Callable
@@ -66,10 +67,28 @@ def find_plugin_dir(astrbot: Path) -> Path | None:
     return None
 
 
+def astrbot_data_roots() -> list[Path]:
+    """AstrBot 可能的数据根目录：环境变量 ASTRBOT_ROOT；桌面客户端版固定使用 ~/.astrbot。"""
+    roots = []
+    if os.environ.get("ASTRBOT_ROOT"):
+        roots.append(Path(os.environ["ASTRBOT_ROOT"]))
+    roots.append(Path.home() / ".astrbot")
+    return roots
+
+
 def install_plugin(astrbot: Path) -> Path:
     plugins = find_plugin_dir(astrbot)
     if plugins is None:
-        raise FileNotFoundError(f"{astrbot} 下没有找到 data 目录，请确认这是 AstrBot 的安装目录")
+        # 桌面客户端版的安装目录里没有 data：数据在用户目录的 .astrbot 下
+        for root in astrbot_data_roots():
+            plugins = find_plugin_dir(root)
+            if plugins is not None:
+                break
+    if plugins is None:
+        raise FileNotFoundError(
+            f"{astrbot} 下没有找到 data 目录，{Path.home() / '.astrbot'} 也不存在。"
+            "源码/安装包版填 AstrBot 的运行目录；客户端版先启动一次 AstrBot 再试"
+        )
     dest = plugins / PLUGIN_NAME
     plugins.mkdir(parents=True, exist_ok=True)
     shutil.copytree(PLUGIN_SRC, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
@@ -153,7 +172,8 @@ def run_setup(
 
     # 4. AstrBot 插件
     if astrbot is None:
-        astrbot = ask("AstrBot 安装目录（用于复制插件；直接回车跳过）：").strip().strip('"')
+        astrbot = ask("AstrBot 目录（用于复制插件；客户端版填安装目录即可，会自动找到用户目录下的 .astrbot；"
+                      "直接回车跳过）：").strip().strip('"')
     if astrbot:
         try:
             dest = install_plugin(Path(astrbot))

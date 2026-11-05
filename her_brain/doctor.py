@@ -247,6 +247,8 @@ def check_astrbot(settings: Settings) -> list[Check]:
     elif "astrbot_identifier" in sources:
         out.append(Check("warn", "AstrBot 插件", "插件未生效，最近一条 QQ 消息的身份来自 AstrBot 的“用户识别”",
                          "能认出你，但分不清私聊和群聊，因此只读公开记忆。插件生效后恢复正常"))
+    if any(u.startswith("anon:") for u in users) or "marker" not in sources:
+        out += _check_desktop_plugin()
     if any(u.startswith("anon:") for u in users):
         out.append(Check(
             "warn", "AstrBot 插件", "有 QQ 消息拿不到发送者（anon:qq），插件没有生效",
@@ -261,6 +263,22 @@ def check_astrbot(settings: Settings) -> list[Check]:
                              "如果其中有你：运行 python -m her_brain setup --qq <冒号后面的部分>，"
                              "或在 http://127.0.0.1:8000/docs 调用 POST /admin/identities 绑定（move_logs 设为 true）"))
     return out
+
+
+def _check_desktop_plugin() -> list[Check]:
+    """AstrBot 桌面客户端版的数据在 ~/.astrbot/data（或 ASTRBOT_ROOT），不在安装目录里。"""
+    from .setup_wizard import PLUGIN_NAME, astrbot_data_roots
+
+    for root in astrbot_data_roots():
+        data = root / "data"
+        if not data.is_dir():
+            continue
+        plugin = data / "plugins" / PLUGIN_NAME
+        if plugin.is_dir():
+            return [Check("info", "AstrBot 插件位置", f"{plugin}（已复制；需重启 AstrBot 才会加载）")]
+        return [Check("warn", "AstrBot 插件位置", f"在 AstrBot 数据目录 {data} 里没有找到插件",
+                      f"运行 python -m her_brain setup --astrbot \"{root}\" --yes，然后重启 AstrBot")]
+    return []
 
 
 def _ago(ts: float) -> str:
