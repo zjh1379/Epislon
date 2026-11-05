@@ -234,6 +234,23 @@ def test_doctor_sees_astrbot_messages(services, make_settings, tmp_path: Path, m
     assert any(c.title == "主人识别" and "openid-abc" in c.detail for c in checks)
 
 
+def test_locate_project_from_other_directory(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """回归：在项目以外的目录运行 doctor 会报“找不到 config/brain.yaml”。"""
+    import her_brain.__main__ as cli
+
+    project = tmp_path / "Epislon"
+    (project / "config").mkdir(parents=True)
+    (project / "config" / "brain.example.yaml").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli, "PROJECT_ROOT", project)
+    monkeypatch.delenv("HER_BRAIN_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)  # 上一级目录
+    assert cli.locate_project(None) == project and Path.cwd() == project
+    monkeypatch.chdir(tmp_path)
+    assert cli.locate_project("custom.yaml") is None and Path.cwd() == tmp_path  # 显式指定配置时不切换
+    monkeypatch.chdir(project)
+    assert cli.locate_project(None) is None  # 已在项目目录
+
+
 # ---------------------------------------------------------------------- 配置助手
 
 

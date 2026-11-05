@@ -64,7 +64,8 @@ def check_config(path: str | None) -> tuple[Settings | None, list[Check]]:
     try:
         settings = load_settings(path)
     except FileNotFoundError as exc:
-        return None, [Check("fail", "配置文件", str(exc), "运行 python -m her_brain init")]
+        return None, [Check("fail", "配置文件", f"{exc}（当前目录 {Path.cwd()}）",
+                            "先 cd 到项目目录；若项目目录里也没有，再运行 python -m her_brain init")]
     except Exception as exc:  # noqa: BLE001
         return None, [Check("fail", "配置文件", f"无法解析：{exc}", "检查 YAML 缩进与字段名")]
     out = [Check("ok", "配置文件", f"{settings.config_path}（记忆引擎 {settings.memory.engine}）")]

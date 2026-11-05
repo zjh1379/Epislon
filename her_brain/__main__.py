@@ -18,11 +18,33 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import shutil
 import sys
 from pathlib import Path
 
 from .config import Settings, default_config_path, load_settings
+
+# 以可编辑方式安装（pip install -e .）时，这就是项目目录
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def locate_project(explicit_config: str | None) -> Path | None:
+    """配置、数据、人设、模型等相对路径都以项目目录为准。
+
+    在别的目录运行命令（例如激活虚拟环境后停在上一级目录）时，自动切换到项目目录；
+    用 -c 或环境变量 HER_BRAIN_CONFIG 指定了配置时不切换。返回切换到的目录。
+    """
+    if explicit_config or os.environ.get("HER_BRAIN_CONFIG"):
+        return None
+    cwd = Path.cwd()
+    if (cwd / "config" / "brain.yaml").exists() or (cwd / "config" / "brain.example.yaml").exists():
+        return None
+    if (PROJECT_ROOT / "config" / "brain.example.yaml").exists() and PROJECT_ROOT != cwd:
+        os.chdir(PROJECT_ROOT)
+        print(f"（当前目录不是项目目录，已切换到 {PROJECT_ROOT}）", file=sys.stderr)
+        return PROJECT_ROOT
+    return None
 
 
 def _setup_logging(level: str) -> None:
@@ -119,6 +141,7 @@ def main(argv: list[str] | None = None) -> None:
     p_restore.add_argument("--no-reindex", action="store_true", help="恢复后不重建向量索引")
     sub.add_parser("reindex", help="按 SQLite 重建向量索引")
     args = parser.parse_args(argv)
+    locate_project(args.config)
 
     if args.cmd == "init":
         _setup_logging("INFO")
