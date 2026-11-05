@@ -105,6 +105,10 @@ class Mem0Index:
             except ImportError as exc:  # pragma: no cover - 取决于安装
                 raise RuntimeError("memory.engine=mem0 需要安装 mem0ai 与 qdrant-client：pip install -e .[mem0]") from exc
             _disable_mem0_telemetry()
+            # spaCy（英文分词/实体）与 fastembed（BM25）缺失时 Mem0 会打警告；它们对中文检索没有帮助，
+            # 向量检索不受影响，屏蔽掉以免在代理窗口里误导排查
+            for name in ("mem0.utils.spacy_models", "mem0.vector_stores.qdrant"):
+                logging.getLogger(name).setLevel(logging.ERROR)
             memory = Memory.from_config(config)
         self.memory = memory
         self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="mem0")

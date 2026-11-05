@@ -186,7 +186,28 @@ def check_proxy(settings: Settings) -> list[Check]:
         data = httpx.get(f"{url}/healthz", timeout=2).json()
     except (httpx.HTTPError, ValueError):
         return [Check("info", "大脑代理", f"{url} 未运行", "python -m her_brain up 启动全部服务")]
-    return [Check("ok", "大脑代理", f"{url}（人设 {data.get('persona')}，引擎 {data.get('engine')}）")]
+    out = [Check("ok", "大脑代理", f"{url}（人设 {data.get('persona')}，引擎 {data.get('engine')}）")]
+    try:
+        headers = {"X-Admin-Token": settings.server.admin_token} if settings.server.admin_token else {}
+        stats = httpx.get(f"{url}/admin/stats", headers=headers, timeout=3).json()["metrics"]
+    except (httpx.HTTPError, ValueError, KeyError):
+        return out
+    counters = stats.get("counters", {})
+    out.append(Check("info", "代理收到的对话", f"成功 {counters.get('turns', 0)} 轮（自本次启动）"))
+    hints = {
+        "auth_rejected": ("API Key 不匹配被拒绝", "入口（AstrBot 提供商）里的 API Key 要与 config/brain.yaml 的 api_keys 一致，例如 sk-her-astrbot"),
+        "not_found": ("请求了不存在的地址", "入口里的 API 地址填 http://127.0.0.1:8000/v1"),
+        "bad_requests": ("请求格式不对", "把代理窗口里对应的日志发给我"),
+        "upstream_failures": ("模型服务出错", "查看 logs/llama-chat.log；显存不足时把 launcher.chat_args 里的 -c 调小"),
+    }
+    events = stats.get("recent_events", [])
+    for kind, (title, hint) in hints.items():
+        n = counters.get(kind, 0)
+        if not n:
+            continue
+        last = next((e["detail"] for e in reversed(events) if e.get("kind") == kind), "")
+        out.append(Check("warn", f"代理：{title}", f"{n} 次，最近一次：{last}", hint))
+    return out
 
 
 def check_astrbot(settings: Settings) -> list[Check]:

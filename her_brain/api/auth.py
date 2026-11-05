@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 import hmac
+import logging
 
 from fastapi import HTTPException, Request
 
 from ..config import ApiKeyConfig, Settings
 
+log = logging.getLogger(__name__)
 LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def client_desc(request: Request) -> str:
+    return request.client.host if request.client else "未知"
+
+
+def record_problem(request: Request, kind: str, detail: str) -> None:
+    """在代理窗口打印被拒绝/失败的请求，并记入 /admin/stats，便于排查“发了消息没回复”。"""
+    log.warning("%s（来自 %s %s %s）", detail, client_desc(request), request.method, request.url.path)
+    services = getattr(request.app.state, "services", None)
+    if services is not None:
+        services.metrics.event(kind, f"{detail}（{request.method} {request.url.path}，来自 {client_desc(request)}）")
 
 
 def bearer_token(request: Request) -> str | None:
@@ -27,6 +41,11 @@ def check_api_key(settings: Settings, request: Request) -> ApiKeyConfig | None:
                 return cfg
     if settings.server.allow_unknown_keys:
         return None
+    shown = f"{token[:8]}…" if token else "（没有带 Key）"
+    record_problem(
+        request, "auth_rejected",
+        f"拒绝了请求：API Key 不匹配，收到 {shown}。入口里填的 Key 要和 config/brain.yaml 的 api_keys 之一一致",
+    )
     raise HTTPException(
         status_code=401,
         detail={"error": {"message": "无效的 API Key", "type": "invalid_request_error", "code": "invalid_api_key"}},

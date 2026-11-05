@@ -148,6 +148,8 @@ class ChatService:
             yield "data: [DONE]\n\n"
         except UpstreamError as exc:
             error = exc.message
+            log.warning("模型服务在回复途中出错：%s", exc.message)
+            self.s.metrics.event("upstream_failures", f"模型服务在回复途中出错：{exc.message}")
             payload = {"error": {"message": exc.message, "type": "upstream_error", "code": exc.status}}
             yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"

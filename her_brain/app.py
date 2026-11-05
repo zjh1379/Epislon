@@ -5,10 +5,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
 from .api import admin, openai_compat
+from .api.auth import record_problem
 from .config import Settings
 from .services import Services
 
@@ -35,6 +38,15 @@ def create_app(settings: Settings, services: Services | None = None, *, run_work
     app = FastAPI(title="Her Brain", version=__version__, lifespan=lifespan)
     app.include_router(openai_compat.router)
     app.include_router(admin.router)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _log_not_found(request: Request, exc: StarletteHTTPException) -> Any:
+        if exc.status_code == 404:
+            hint = ""
+            if request.url.path.endswith("/chat/completions"):
+                hint = "。入口里的 API 地址应填 http://<代理地址>:8000/v1，不要包含 /chat/completions"
+            record_problem(request, "not_found", f"收到了未知地址的请求{hint}")
+        return await http_exception_handler(request, exc)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:

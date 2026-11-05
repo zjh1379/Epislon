@@ -177,6 +177,47 @@ async def test_api_keys(make_settings, fake: FakeLLM) -> None:  # type: ignore[n
         await svc.close()
 
 
+async def test_rejected_requests_are_logged(make_settings, fake: FakeLLM, caplog) -> None:  # type: ignore[no-untyped-def]
+    """排查“发了消息没回复”：被拒绝的请求要在代理窗口里打印原因，并能在 /admin/stats 看到。"""
+    from her_brain.app import create_app
+    from her_brain.services import Services, Transports
+
+    settings = make_settings(api_keys=[{"key": "sk-her-astrbot", "channel": "qq"}])
+    svc = Services(settings, transports=Transports(upstream=fake.transport()))
+    app = create_app(settings, svc, run_worker=False)
+    app.state.services = svc
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://b") as c:
+            with caplog.at_level("WARNING"):
+                r = await c.post("/v1/chat/completions", json=chat_body("hi"), headers={"Authorization": "Bearer sk-wrong-key"})
+            assert r.status_code == 401
+            assert "API Key 不匹配" in caplog.text and "sk-wrong" in caplog.text
+            # 地址少写了 /v1：照样可用
+            ok = {"Authorization": "Bearer sk-her-astrbot"}
+            assert (await c.post("/chat/completions", json=chat_body("hi", metadata=QQ_PRIVATE), headers=ok)).status_code == 200
+            assert (await c.get("/models", headers=ok)).json()["data"][0]["id"] == "her"
+            # 地址里多写了 /chat/completions：404 并给出提示
+            r = await c.post("/v1/chat/completions/chat/completions", json=chat_body("hi"), headers=ok)
+            assert r.status_code == 404
+            stats = (await c.get("/admin/stats")).json()["metrics"]
+            assert stats["counters"]["auth_rejected"] == 1 and stats["counters"]["not_found"] == 1
+            assert any("不要包含 /chat/completions" in e["detail"] for e in stats["recent_events"])
+    finally:
+        await svc.close()
+
+
+async def test_non_stream_upstream_error_mid_response(client: httpx.AsyncClient, services, fake: FakeLLM) -> None:  # type: ignore[no-untyped-def]
+    async def broken(body: dict[str, Any]):  # type: ignore[no-untyped-def]
+        yield b'data: {"choices": [{"index": 0, "delta": {"content": "\xe4\xbd\xa0"}}]}\n\n'
+        yield b'data: {"error": {"message": "CUDA out of memory"}}\n\n'
+
+    fake.sse = broken  # type: ignore[method-assign]
+    r = await client.post("/v1/chat/completions", json=chat_body("hi", metadata=QQ_PRIVATE))
+    assert r.status_code == 502 and "out of memory" in r.json()["error"]["message"]
+    assert services.activity.active == 0
+    assert services.metrics.summary()["counters"]["upstream_failures"] == 1
+
+
 async def test_admin_debug_prompt_and_stats(client: httpx.AsyncClient) -> None:
     await client.post("/v1/chat/completions", json=chat_body("你好", metadata=QQ_PRIVATE))
     r = await client.post("/admin/debug/prompt", json=chat_body("你好", metadata=QQ_GROUP))

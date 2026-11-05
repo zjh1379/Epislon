@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections import defaultdict, deque
 from typing import Any
 
@@ -11,7 +12,14 @@ class Metrics:
     def __init__(self, window: int = 500):
         self._series: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=window))
         self._counters: dict[str, int] = defaultdict(int)
+        # 最近被拒绝/失败的请求，供 doctor 与 /admin/stats 排查“发了消息没回复”
+        self._events: deque[dict[str, Any]] = deque(maxlen=20)
         self._lock = threading.Lock()
+
+    def event(self, kind: str, detail: str) -> None:
+        with self._lock:
+            self._counters[kind] += 1
+            self._events.append({"time": time.time(), "kind": kind, "detail": detail})
 
     def observe(self, name: str, value: float) -> None:
         with self._lock:
@@ -25,7 +33,8 @@ class Metrics:
         with self._lock:
             series = {k: sorted(v) for k, v in self._series.items()}
             counters = dict(self._counters)
-        out: dict[str, Any] = {"counters": counters, "latency_ms": {}}
+            events = list(self._events)
+        out: dict[str, Any] = {"counters": counters, "latency_ms": {}, "recent_events": events}
         for name, values in series.items():
             if not values:
                 continue
