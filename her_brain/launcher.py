@@ -128,6 +128,39 @@ def is_healthy(root: str, timeout: float = 2.0) -> bool:
     return False
 
 
+def probe_generation(base_url: str, timeout: float = 30.0) -> tuple[bool, str]:
+    """让对话服务真的生成 1 个 token。/health 只说明进程活着，测不出“卡住”
+    （例如显存溢出到系统内存后极慢，或槽位被占满）。"""
+    t0 = time.monotonic()
+    try:
+        r = httpx.post(f"{base_url.rstrip('/')}/chat/completions", timeout=timeout,
+                       json={"messages": [{"role": "user", "content": "嗯"}], "max_tokens": 1, "temperature": 0,
+                             "chat_template_kwargs": {"enable_thinking": False}})
+        r.raise_for_status()
+    except httpx.TimeoutException:
+        return False, f"{timeout:.0f} 秒内没有生成出任何内容（服务卡住）"
+    except httpx.HTTPError as exc:
+        return False, f"生成测试失败：{exc}"
+    return True, f"生成 1 个字用时 {(time.monotonic() - t0) * 1000:.0f}ms"
+
+
+def probe_embedding(base_url: str, timeout: float = 15.0) -> tuple[bool, str]:
+    t0 = time.monotonic()
+    try:
+        r = httpx.post(f"{base_url.rstrip('/')}/embeddings", json={"input": ["测试"]}, timeout=timeout)
+        r.raise_for_status()
+    except httpx.TimeoutException:
+        return False, f"{timeout:.0f} 秒内没有返回向量（服务卡住）"
+    except httpx.HTTPError as exc:
+        return False, f"嵌入测试失败：{exc}"
+    return True, f"计算向量用时 {(time.monotonic() - t0) * 1000:.0f}ms"
+
+
+STUCK_HINT = ("服务卡住多半是显存不够（溢出到系统内存后会极慢）或残留进程异常：先运行 python -m her_brain stop，"
+              "在任务管理器里结束所有 llama-server.exe，再重新启动；12GB 显卡建议把嵌入模型放到 CPU、"
+              "把对话上下文调小（见 README“显存不足时”）")
+
+
 def pooling_args(model: Path, args: list[str]) -> list[str]:
     if "--pooling" in args:
         return []
@@ -193,7 +226,11 @@ def start_backends(
         for backend in plan_backends(settings, chat=chat, embedding=embedding):
             host = urlparse(backend.root).hostname or ""
             if is_healthy(backend.root):
-                printer(f"[跳过] {backend.name}已在运行：{backend.root}")
+                base = f"{backend.root}/v1"
+                ok, detail = (probe_embedding(base) if backend.name == "嵌入模型" else probe_generation(base))
+                if not ok:
+                    raise LauncherError(f"{backend.name}已在运行（{backend.root}），但{detail}。{STUCK_HINT}")
+                printer(f"[跳过] {backend.name}已在运行：{backend.root}（{detail}）")
                 continue
             if host not in LOCAL_HOSTS:
                 raise LauncherError(f"{backend.name}地址 {backend.root} 不是本机，且无法连接；请先在那台机器上启动它")
@@ -228,7 +265,11 @@ def _wait_ready(backend: Backend, timeout: float, printer: Callable[[str], None]
         if code is not None:
             raise LauncherError(f"{backend.name}启动失败（退出码 {code}），日志最后几行：\n{_tail(backend.log_path)}")
         if is_healthy(backend.root, timeout=1.0):
-            printer(f"[就绪] {backend.name}（{time.monotonic() - t0:.0f} 秒）")
+            base = f"{backend.root}/v1"
+            ok, detail = (probe_embedding(base, 60) if backend.name == "嵌入模型" else probe_generation(base, 120))
+            if not ok:
+                raise LauncherError(f"{backend.name}加载完成，但{detail}。{STUCK_HINT}")
+            printer(f"[就绪] {backend.name}（{time.monotonic() - t0:.0f} 秒，{detail}）")
             return
         now = time.monotonic()
         if now - t0 > timeout:

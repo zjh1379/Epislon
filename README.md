@@ -110,6 +110,16 @@ python -m her_brain doctor
 
 想手动控制 llama-server 参数时，仍可用 `deploy\start_llama_server.bat` 和 `deploy\start_embedding_server.bat`，或在配置的 `launcher` 段里修改。对话服务开两个槽位（`-np 2`），0 号给对话、1 号给后台提取，互不冲掉前缀缓存。
 
+### 显存不足时（例如 12GB 显卡）
+
+Qwen3-14B Q4 + 16K 上下文 + 嵌入模型合计约 11~12GB。显存一满，Windows 驱动会把一部分挪到系统内存，生成速度会慢上百倍，看起来就像“卡住、不回复”。`doctor` 会真的让模型生成一个字来检测这种情况。处理办法：在 `config\brain.yaml` 的 `launcher` 段里
+
+- `chat_args` 中的 `-c 16384` 改为 `-c 8192`（两个槽位各 4K 上下文）；
+- 加上 `embedding_args: ["--embedding", "-ngl", "0", "-c", "2048", "-ub", "2048"]`，把嵌入模型放到 CPU；
+- 仍然不够时，换 8B 级模型（如 Qwen3-8B Q4_K_M）。
+
+改完后运行 `python -m her_brain stop`，在任务管理器里确认没有残留的 `llama-server.exe`，再双击 `deploy\up.bat`。
+
 ### 其他测量
 
 1. **测速基线**（实施步骤 1）：

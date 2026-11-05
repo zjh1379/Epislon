@@ -140,10 +140,15 @@ def check_gpu() -> list[Check]:
 
 
 def check_upstream(settings: Settings) -> list[Check]:
+    from .launcher import STUCK_HINT, probe_generation
+
     root, _, _ = endpoint_root(settings.upstream.base_url)
     if not is_healthy(root):
         return [Check("warn", "对话服务", f"{root} 未运行", "运行 python -m her_brain up 会自动启动")]
-    detail = root
+    ok, probe = probe_generation(settings.upstream.base_url)
+    if not ok:
+        return [Check("fail", "对话服务", f"{root} 在运行，但{probe}", STUCK_HINT)]
+    detail = f"{root}，{probe}"
     try:
         data = httpx.get(f"{settings.upstream.base_url.rstrip('/')}/models", timeout=3).json().get("data", [])
         if data:
@@ -159,9 +164,14 @@ def check_embedding(settings: Settings) -> list[Check]:
     root, _, _ = endpoint_root(settings.embedding.base_url)
     if not is_healthy(root):
         return [Check("warn", "嵌入服务", f"{root} 未运行", "运行 python -m her_brain up 会自动启动")]
-    r = httpx.post(f"{settings.embedding.base_url.rstrip('/')}/embeddings",
-                   json={"model": settings.embedding.model, "input": ["测试"]}, timeout=10)
-    r.raise_for_status()
+    from .launcher import STUCK_HINT
+
+    try:
+        r = httpx.post(f"{settings.embedding.base_url.rstrip('/')}/embeddings",
+                       json={"model": settings.embedding.model, "input": ["测试"]}, timeout=15)
+        r.raise_for_status()
+    except httpx.TimeoutException:
+        return [Check("fail", "嵌入服务", f"{root} 在运行，但 15 秒内没有返回向量（服务卡住）", STUCK_HINT)]
     dims = len(r.json()["data"][0]["embedding"])
     if dims != settings.embedding.dims:
         return [Check("fail", "嵌入服务", f"向量维度 {dims} 与配置 embedding.dims={settings.embedding.dims} 不一致",

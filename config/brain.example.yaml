@@ -56,6 +56,8 @@ upstream:
       max_tokens: 200        # 语音回复要短，减少生成时间
     group:
       max_tokens: 200
+    private:
+      max_tokens: 400      # 防止模型生成停不下来、长时间占住显卡
 
 # 后台提取用的模型（未填写的字段沿用 upstream）
 worker_llm:
@@ -130,6 +132,8 @@ launcher:
   # 对话服务参数：两个槽位各 8K 上下文；显存不够时把 16384 降到 12288，或换 8B 模型
   chat_args: ["-ngl", "99", "-c", "16384", "-np", "2", "-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0",
               "--jinja", "--reasoning-budget", "0", "--cache-reuse", "256", "--metrics"]
+  # 显存 12GB 及以下：把嵌入模型放到 CPU（0.6B 在 CPU 上算一句话也只要几十毫秒），并把上面的 -c 16384 改为 8192
+  # embedding_args: ["--embedding", "-ngl", "0", "-c", "2048", "-ub", "2048"]
 
 # 扩展（下一阶段：小鸭机器人等）
 extensions: []
