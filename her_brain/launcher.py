@@ -269,12 +269,71 @@ def _exit_on_sigterm() -> None:
                 pass
 
 
+def proxy_root(settings: Settings, host: str | None = None, port: int | None = None) -> str:
+    h = host or settings.server.host
+    if h in ("0.0.0.0", "::", ""):
+        h = "127.0.0.1"
+    return f"http://{h}:{port or settings.server.port}"
+
+
+def proxy_conflict(settings: Settings, host: str | None = None, port: int | None = None) -> str | None:
+    """代理端口已被占用时返回说明。本地嵌入模式的 Qdrant 只允许一个进程打开，不能同时运行两个代理。"""
+    import socket
+
+    root = proxy_root(settings, host, port)
+    try:
+        data = httpx.get(f"{root}/healthz", timeout=2).json()
+        if data.get("ok"):
+            return (f"大脑代理已经在运行（{root}）。要重启（例如 git pull 之后），先运行 "
+                    "python -m her_brain stop，或在原来的窗口按 Ctrl+C")
+    except (httpx.HTTPError, ValueError):
+        pass
+    parsed = urlparse(root)
+    with socket.socket() as s:
+        s.settimeout(1)
+        if s.connect_ex((parsed.hostname or "127.0.0.1", parsed.port or 80)) == 0:
+            return f"端口 {parsed.port} 已被其他程序占用。关闭它，或在配置 server.port 中换一个端口"
+    return None
+
+
+def stop_running(settings: Settings, printer: Callable[[str], None] = print, timeout: float = 30) -> int:
+    """python -m her_brain stop：请求正在运行的代理优雅退出，由 up 启动的 llama-server 随之关闭。"""
+    root = proxy_root(settings)
+    headers = {"X-Admin-Token": settings.server.admin_token} if settings.server.admin_token else {}
+    try:
+        r = httpx.post(f"{root}/admin/shutdown", headers=headers, timeout=5)
+    except httpx.HTTPError:
+        printer(f"大脑代理没有在运行（{root}）")
+        return 0
+    if r.status_code == 404:
+        printer("正在运行的是旧版本，不支持 stop。请在它的窗口按 Ctrl+C，"
+                "或在任务管理器里结束对应的 python.exe 与 llama-server.exe")
+        return 1
+    if r.status_code != 200:
+        printer(f"停止失败：HTTP {r.status_code} {r.text[:200]}")
+        return 1
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            httpx.get(f"{root}/healthz", timeout=1)
+        except httpx.HTTPError:
+            printer("大脑代理已停止（由 up 启动的模型服务也已一并关闭）")
+            return 0
+        time.sleep(0.5)
+    printer(f"已发出停止请求，但 {timeout:.0f} 秒后仍在运行")
+    return 1
+
+
 def run_up(settings: Settings, *, chat: bool = True, embedding: bool = True, host: str | None = None,
            port: int | None = None) -> None:
     import uvicorn
 
     from .app import create_app
 
+    conflict = proxy_conflict(settings, host, port)
+    if conflict:
+        print(f"[跳过] {conflict}", file=sys.stderr)
+        raise SystemExit(1)
     _exit_on_sigterm()
     try:
         backends = start_backends(settings, chat=chat, embedding=embedding)
@@ -300,5 +359,7 @@ def run_up(settings: Settings, *, chat: bool = True, embedding: bool = True, hos
             log_level=settings.server.log_level.lower(),
             access_log=False,
         )
+    except KeyboardInterrupt:  # Ctrl+C 或 stop：正常退出，不打印堆栈
+        pass
     finally:
         stop_backends(backends)

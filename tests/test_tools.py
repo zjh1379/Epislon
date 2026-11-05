@@ -167,6 +167,54 @@ def test_up_cleans_children_on_sigterm(tmp_path: Path) -> None:
             proc.kill()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="用 shebang 脚本模拟 llama-server")
+def test_second_up_is_refused_and_stop_works(tmp_path: Path) -> None:
+    """回归：旧的 up 还在运行时再启动一个，会因 Qdrant 本地目录被锁而打印一大段堆栈。"""
+    import subprocess
+    import time
+
+    import httpx
+
+    script = _fake_llama_script(tmp_path)
+    models = tmp_path / "models"
+    _gguf(models / "chat.gguf", 10)
+    shutil.copytree(ROOT / "persona", tmp_path / "persona")
+    p_llm, p_brain = _free_port(), _free_port()
+    cfg = tmp_path / "brain.yaml"
+    cfg.write_text(
+        f"data_dir: {tmp_path / 'data'}\npersona_path: {tmp_path / 'persona' / 'her.yaml'}\n"
+        f"server: {{port: {p_brain}}}\nupstream: {{base_url: 'http://127.0.0.1:{p_llm}/v1', warmup: false}}\n"
+        "memory: {engine: lite}\nworker: {enabled: false}\n"
+        f"backup: {{enabled: false, dir: {tmp_path / 'backups'}}}\n"
+        f"launcher: {{models_dir: {models}, llama_server: {script}, log_dir: {tmp_path / 'logs'}}}\n",
+        encoding="utf-8",
+    )
+    cli = [sys.executable, "-m", "her_brain", "-c", str(cfg)]
+    first = subprocess.Popen([*cli, "up"], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        for _ in range(200):
+            try:
+                if httpx.get(f"http://127.0.0.1:{p_brain}/healthz", timeout=0.5).status_code == 200:
+                    break
+            except httpx.HTTPError:
+                time.sleep(0.1)
+        second = subprocess.run([*cli, "up"], cwd=ROOT, capture_output=True, text=True, timeout=60)
+        assert second.returncode == 1
+        assert "已经在运行" in second.stderr and "Traceback" not in second.stderr + second.stdout
+
+        stop = subprocess.run([*cli, "stop"], cwd=ROOT, capture_output=True, text=True, timeout=60)
+        assert stop.returncode == 0 and "已停止" in stop.stdout, stop.stdout + stop.stderr
+        first.wait(timeout=30)
+        out = first.stdout.read().decode() if first.stdout else ""
+        assert "[停止] 对话模型" in out and "Traceback" not in out and "KeyboardInterrupt" not in out
+        assert not is_healthy(f"http://127.0.0.1:{p_llm}", timeout=0.3)
+        again = subprocess.run([*cli, "stop"], cwd=ROOT, capture_output=True, text=True, timeout=30)
+        assert again.returncode == 0 and "没有在运行" in again.stdout
+    finally:
+        if first.poll() is None:
+            first.kill()
+
+
 def _fake_llama_script(tmp_path: Path) -> Path:
     script = tmp_path / "llama.cpp" / "llama-server"
     script.parent.mkdir(exist_ok=True)

@@ -100,6 +100,24 @@ async def test_mem0_close_releases_qdrant_lock(tmp_path) -> None:  # type: ignor
     await second.close()
 
 
+async def test_qdrant_locked_by_another_process_has_clear_message(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from her_brain.config import Settings
+    from her_brain.memory.db import Database
+    from her_brain.memory.episodic import create_index
+
+    (tmp_path / "data").mkdir()
+    s = Settings.model_validate({"data_dir": str(tmp_path / "data"), "embedding": {"enabled": True},
+                                 "memory": {"engine": "mem0", "qdrant_path": str(tmp_path / "q")}})
+    db = Database(s.db_path)
+    first = create_index(s, db, None)
+    try:
+        with pytest.raises(RuntimeError, match="python -m her_brain stop"):
+            create_index(s, db, None)
+    finally:
+        await first.close()
+        db.close()
+
+
 async def test_mem0_reindex_from_sqlite(mem0_services) -> None:  # type: ignore[no-untyped-def]
     ep = mem0_services.episodic
     _, rec = await ep.remember("owner", Fact(text="小明养了一只猫叫团子"), PRIVATE, ["l1"])

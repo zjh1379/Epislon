@@ -81,7 +81,7 @@ D:\her\
 ### 三步完成
 
 1. **安装**：双击 `deploy\setup_windows.bat`。它会创建虚拟环境、安装依赖、生成配置，然后问你 QQ 号、AstrBot 安装目录（会自动复制插件）和 AstrBot 是否在 Docker 里，最后做一次环境自检。
-2. **启动**：双击 `deploy\up.bat`。它会自动找到 `models\` 里的模型和 llama-server，依次启动对话模型、嵌入模型和大脑代理；按 Ctrl+C 一并关闭。服务已在运行时会跳过，所以也可以自己先启动 llama-server。
+2. **启动**：双击 `deploy\up.bat`。它会自动找到 `models\` 里的模型和 llama-server，依次启动对话模型、嵌入模型和大脑代理；按 Ctrl+C 一并关闭。已有代理在运行时会先把它停掉，所以 `git pull` 之后直接再双击一次即可。同一时间只能运行一个代理（Qdrant 本地嵌入模式是独占的）。
 3. **自测**：另开一个窗口双击 `deploy\selftest.bat`。它在临时目录里用你的真实模型把整个流程跑一遍，不会写入正式记忆：
 
    ```
@@ -104,6 +104,7 @@ python -m her_brain doctor
 | `python -m her_brain setup` | 配置助手（可重复运行；`--qq`、`--astrbot`、`--docker`、`--engine`、`--yes`） |
 | `python -m her_brain doctor` | 环境自检：依赖、配置、模型、llama-server、显卡、各服务、嵌入维度、AstrBot 是否接入 |
 | `python -m her_brain up` | 一键启动（`--no-llm` / `--no-embed` 跳过某个模型服务） |
+| `python -m her_brain stop` | 停止正在运行的代理及由 `up` 启动的模型服务（`git pull` 后重启前先运行；`up.bat` 会自动执行） |
 | `python -m her_brain selftest` | 端到端自测（`--keep` 保留临时数据以便排查） |
 
 想手动控制 llama-server 参数时，仍可用 `deploy\start_llama_server.bat` 和 `deploy\start_embedding_server.bat`，或在配置的 `launcher` 段里修改。对话服务开两个槽位（`-np 2`），0 号给对话、1 号给后台提取，互不冲掉前缀缓存。

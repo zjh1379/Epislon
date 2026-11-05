@@ -1,6 +1,7 @@
 """命令行入口：python -m her_brain <命令>
 
   up         一键启动：自动找到模型与 llama-server，启动对话/嵌入服务和大脑代理
+  stop       停止正在运行的大脑代理（git pull 之后重启前先运行它）
   serve      只启动大脑代理（模型服务自行启动时使用）
   init       生成配置文件、数据目录与数据库
   setup      配置助手：填 QQ 号、选择记忆引擎、安装 AstrBot 插件
@@ -61,7 +62,11 @@ def cmd_serve(settings: Settings, args: argparse.Namespace) -> None:
     import uvicorn
 
     from .app import create_app
+    from .launcher import proxy_conflict
 
+    conflict = proxy_conflict(settings, args.host, args.port)
+    if conflict:
+        sys.exit(f"[跳过] {conflict}")
     app = create_app(settings)
     uvicorn.run(
         app,
@@ -119,6 +124,7 @@ def main(argv: list[str] | None = None) -> None:
     p_up.add_argument("--port", type=int)
     p_up.add_argument("--no-llm", action="store_true", help="不启动对话模型（已在别处运行）")
     p_up.add_argument("--no-embed", action="store_true", help="不启动嵌入模型")
+    sub.add_parser("stop", help="停止正在运行的大脑代理（以及由 up 启动的模型服务）")
     p_serve = sub.add_parser("serve", help="只启动大脑代理")
     p_serve.add_argument("--host")
     p_serve.add_argument("--port", type=int)
@@ -160,6 +166,10 @@ def main(argv: list[str] | None = None) -> None:
     settings = load_settings(args.config)
     _setup_logging(settings.server.log_level)
 
+    if args.cmd == "stop":
+        from .launcher import stop_running
+
+        sys.exit(stop_running(settings))
     if args.cmd == "up":
         from .launcher import run_up
 

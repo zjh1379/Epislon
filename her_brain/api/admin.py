@@ -329,6 +329,18 @@ async def list_backups(request: Request) -> list[dict[str, Any]]:
     return _svc(request).backup.list()
 
 
+# ---------------------------------------------------------------------- 停止
+@router.post("/shutdown")
+async def shutdown(request: Request) -> dict[str, Any]:
+    """优雅停止（python -m her_brain stop 调用）。由 up 启动的 llama-server 也会随之关闭。"""
+    import asyncio
+    import signal
+
+    # 先把响应发出去，再触发与 Ctrl+C 相同的退出流程
+    asyncio.get_running_loop().call_later(0.3, signal.raise_signal, signal.SIGINT)
+    return {"ok": True, "message": "正在停止"}
+
+
 # ---------------------------------------------------------------------- 调试
 @router.post("/debug/prompt")
 async def debug_prompt(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
