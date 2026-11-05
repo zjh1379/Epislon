@@ -118,6 +118,25 @@ async def test_qdrant_locked_by_another_process_has_clear_message(tmp_path) -> N
         db.close()
 
 
+async def test_mem0_search_embeds_query_once(mem0_services) -> None:  # type: ignore[no-untyped-def]
+    """读路径优化：同时检索“当前用户”和“她自己”时只算一次查询向量（曾因两次嵌入导致检索超时）。"""
+    ep = mem0_services.episodic
+    await ep.remember("owner", Fact(text="小明周末喜欢去爬山"), PUBLIC, ["l1"])
+    await ep.remember("_self", Fact(text="小E最近在学画画", about="self"), PUBLIC, ["l2"])
+    embedder = mem0_services.index.memory.embedding_model
+    calls: list[str] = []
+    original = embedder.embed
+
+    def counting(text, memory_action=None):  # type: ignore[no-untyped-def]
+        calls.append(memory_action)
+        return original(text, memory_action)
+
+    embedder.embed = counting
+    hits = await ep.search(["owner", "_self"], "小明周末喜欢去爬山吗", {PUBLIC}, 5)
+    assert calls == ["search"]
+    assert hits and hits[0].record.text == "小明周末喜欢去爬山"
+
+
 async def test_mem0_reindex_from_sqlite(mem0_services) -> None:  # type: ignore[no-untyped-def]
     ep = mem0_services.episodic
     _, rec = await ep.remember("owner", Fact(text="小明养了一只猫叫团子"), PRIVATE, ["l1"])

@@ -31,17 +31,23 @@ _SERVER_HOST_RE = re.compile(r"(?m)^(server:[^\n]*\n(?:[ \t]*#[^\n]*\n)*[ \t]+ho
 _BINDINGS_RE = re.compile(r"(?m)^([ \t]*)bindings:[ \t]*$")
 
 
-def set_qq(text: str, qq: str) -> str:
-    qq = qq.strip()
-    if not qq or re.search(rf"qq:{re.escape(qq)}(?![\w-])", text):
+def add_binding(text: str, binding: str) -> str:
+    """在配置里第一个用户（示例中为主人）的 bindings 下加一条身份；示例占位的 qq:123456 会被替换。"""
+    binding = binding.strip()
+    if not binding or re.search(rf"{re.escape(binding)}(?![\w-])", text):
         return text
-    if PLACEHOLDER_QQ in text:
-        return text.replace(PLACEHOLDER_QQ, f"qq:{qq}")
+    if binding.startswith("qq:") and PLACEHOLDER_QQ in text:
+        return text.replace(PLACEHOLDER_QQ, binding)
     m = _BINDINGS_RE.search(text)
     if m is None:
         raise ValueError("配置里没有找到 users[].bindings，无法自动添加，请手动编辑")
     indent = m.group(1)
-    return text[: m.end()] + f"\n{indent}  - qq:{qq}" + text[m.end():]
+    return text[: m.end()] + f"\n{indent}  - {binding}" + text[m.end():]
+
+
+def set_qq(text: str, qq: str) -> str:
+    qq = qq.strip()
+    return add_binding(text, f"qq:{qq}") if qq else text
 
 
 def set_engine(text: str, engine: str) -> str:
@@ -93,6 +99,74 @@ def install_plugin(astrbot: Path) -> Path:
     plugins.mkdir(parents=True, exist_ok=True)
     shutil.copytree(PLUGIN_SRC, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
     return dest
+
+
+def run_bind(
+    config_path: str | None,
+    external_id: str,
+    *,
+    platform: str = "qq",
+    user_id: str | None = None,
+    printer: Callable[[str], None] = print,
+) -> int:
+    """python -m her_brain bind <ID>：把一个平台身份绑定到主人（或 --user 指定的用户）。
+
+    QQ 官方机器人给的是 openid（例如 53B97737D288FD889DAAF91A0C7A4EDA），不是 QQ 号；
+    同一个人在私聊和群聊里的 openid 通常也不同，需要分别绑定。
+    """
+    import httpx
+
+    from .identity.resolver import IdentityResolver
+    from .launcher import proxy_root
+    from .memory.db import Database
+
+    cfg_path = Path(config_path) if config_path else default_config_path()
+    settings = load_settings(cfg_path)
+    target = user_id or next((u.user_id for u in settings.users if u.role == "owner"), None)
+    if target is None:
+        printer("配置里没有 role: owner 的用户，请用 --user 指定要绑定到谁")
+        return 1
+    external_id = external_id.strip()
+    if ":" in external_id:  # 也接受 qq:xxx 这种带平台前缀的写法（与 doctor 显示的一致）
+        platform, external_id = external_id.split(":", 1)
+
+    root = proxy_root(settings)
+    headers = {"X-Admin-Token": settings.server.admin_token} if settings.server.admin_token else {}
+    body = {"platform": platform, "external_id": external_id, "user_id": target, "move_logs": True}
+    try:
+        r = httpx.post(f"{root}/admin/identities", json=body, headers=headers, timeout=10)
+    except httpx.HTTPError:
+        r = None
+    if r is not None and r.status_code == 200:
+        result = r.json()
+    elif r is not None:
+        printer(f"绑定失败：HTTP {r.status_code} {r.text[:200]}")
+        return 1
+    else:  # 代理没在运行：直接写数据库
+        db = Database(settings.db_path)
+        try:
+            resolver = IdentityResolver(db, settings)
+            resolver.seed()
+            result = resolver.link(platform, external_id, target, move_logs=True)
+        finally:
+            db.close()
+    moved = result.get("moved_logs", 0)
+    printer(f"已绑定 {platform}:{external_id} → {target}"
+            + (f"（之前以访客身份聊的 {moved} 条对话已迁移，后台会重新提取记忆）" if moved else ""))
+
+    if settings.users and settings.users[0].user_id == target:
+        original = cfg_path.read_text(encoding="utf-8")
+        text = add_binding(original, f"{platform}:{external_id}")
+        if text != original:
+            cfg_path.with_name(cfg_path.name + ".bak").write_text(original, encoding="utf-8")
+            cfg_path.write_text(text, encoding="utf-8")
+            try:
+                load_settings(cfg_path)
+                printer(f"已写入 {cfg_path}（重建数据时也会保留）")
+            except Exception as exc:  # noqa: BLE001
+                cfg_path.write_text(original, encoding="utf-8")
+                printer(f"写入配置后校验失败，已恢复原样（数据库中的绑定仍然有效）：{exc}")
+    return 0
 
 
 def _yes(answer: str, default: bool = True) -> bool:

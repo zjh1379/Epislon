@@ -5,6 +5,7 @@
   serve      只启动大脑代理（模型服务自行启动时使用）
   init       生成配置文件、数据目录与数据库
   setup      配置助手：填 QQ 号、选择记忆引擎、安装 AstrBot 插件
+  bind       把一个平台身份（QQ 号 / QQ 官方机器人 openid）绑定到主人
   doctor     环境自检
   selftest   端到端自测（临时数据，不影响正式记忆）
   process    立即处理所有待提取的原始日志（代理未运行时使用）
@@ -135,6 +136,10 @@ def main(argv: list[str] | None = None) -> None:
     p_setup.add_argument("--docker", action="store_true", default=None, help="AstrBot 运行在 Docker 中")
     p_setup.add_argument("--engine", choices=["mem0", "lite"], help="指定记忆引擎")
     p_setup.add_argument("--yes", action="store_true", help="不提问，未给出的项保持不变")
+    p_bind = sub.add_parser("bind", help="把一个平台身份（QQ 号或 QQ 官方机器人的 openid）绑定到主人")
+    p_bind.add_argument("external_id", help="例如 834943383、53B97737D288FD889DAAF91A0C7A4EDA 或 qq:xxx")
+    p_bind.add_argument("--platform", default="qq")
+    p_bind.add_argument("--user", help="绑定到哪个用户（默认配置里的主人）")
     sub.add_parser("doctor", help="环境自检")
     p_self = sub.add_parser("selftest", help="端到端自测（需要模型服务已启动）")
     p_self.add_argument("--keep", action="store_true", help="保留自测的临时数据目录")
@@ -158,6 +163,10 @@ def main(argv: list[str] | None = None) -> None:
 
         sys.exit(run_setup(args.config, qq=args.qq, astrbot=args.astrbot, docker=args.docker,
                            engine=args.engine, assume_yes=args.yes))
+    if args.cmd == "bind":
+        from .setup_wizard import run_bind
+
+        sys.exit(run_bind(args.config, args.external_id, platform=args.platform, user_id=args.user))
     if args.cmd == "doctor":
         from .doctor import print_report, run_doctor
 

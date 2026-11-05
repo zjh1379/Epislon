@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -25,6 +26,8 @@ from .launcher import discover_models, endpoint_root, find_llama_server, is_heal
 
 LABELS = {"ok": "[通过]", "warn": "[注意]", "fail": "[失败]", "info": "[信息]"}
 PLACEHOLDER_QQ = "qq:123456"
+# QQ 官方机器人接口给的用户标识（user_openid / member_openid），例如 53B97737D288FD889DAAF91A0C7A4EDA
+OPENID_RE = re.compile(r"[0-9A-Fa-f]{24,64}")
 
 
 @dataclass
@@ -256,12 +259,17 @@ def check_astrbot(settings: Settings) -> list[Check]:
             "启动日志里没有它的报错；插件生效后，收到第一条消息时 AstrBot 控制台会打印“[her_bridge] 已为大脑代理附加身份”；"
             "③ 若在会话管理里限制了插件启用范围，需把它加进去；④ 临时退路：在 AstrBot 配置里打开「用户识别」",
         ))
-    if not users & owners:
-        guests = sorted(u for u in users if u.startswith("qq:"))
-        if guests:
-            out.append(Check("warn", "主人识别", f"QQ 消息被识别为访客：{'、'.join(guests[:5])}",
-                             "如果其中有你：运行 python -m her_brain setup --qq <冒号后面的部分>，"
-                             "或在 http://127.0.0.1:8000/docs 调用 POST /admin/identities 绑定（move_logs 设为 true）"))
+    guests = sorted(u for u in users if u.startswith("qq:"))
+    if guests and not users & owners:
+        openids = [g for g in guests if OPENID_RE.fullmatch(g[3:])]
+        detail = f"QQ 消息被识别为访客：{'、'.join(guests[:5])}"
+        if openids:
+            detail += "。其中形如一长串十六进制的是 QQ 官方机器人的 openid（官方接口拿不到真实 QQ 号，私聊和群聊的 openid 也不同）"
+        out.append(Check("warn", "主人识别", detail,
+                         f"如果其中有你，运行 python -m her_brain bind {guests[0]}（之前的对话会迁移给你并重新提取记忆）"))
+    elif guests:
+        out.append(Check("info", "QQ 访客", "、".join(guests[:5]),
+                         "其中若有你在别的场合（例如群聊）的 openid，用 python -m her_brain bind <ID> 绑定"))
     return out
 
 

@@ -359,6 +359,52 @@ def test_install_plugin_desktop_client(tmp_path: Path, monkeypatch) -> None:  # 
     assert install_plugin(install_dir).parent == custom / "data" / "plugins"
 
 
+def test_bind_qq_official_openid(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """QQ 官方机器人给的是 openid：以访客身份聊过之后再绑定，对话迁移给主人并重新提取。"""
+    from her_brain.identity.models import RequestMeta
+    from her_brain.identity.resolver import IdentityResolver
+    from her_brain.memory.db import Database
+    from her_brain.memory.rawlog import RawLogStore
+    from her_brain.setup_wizard import run_bind
+
+    monkeypatch.chdir(tmp_path)
+    shutil.copytree(ROOT / "persona", tmp_path / "persona")
+    cfg = tmp_path / "config" / "brain.yaml"
+    cfg.parent.mkdir()
+    text = (ROOT / "config" / "brain.example.yaml").read_text(encoding="utf-8").replace("qq:123456", "qq:834943383")
+    cfg.write_text(text.replace("port: 8000", f"port: {_free_port()}"), encoding="utf-8")  # 代理未运行
+    settings = load_settings(cfg)
+    openid = "53B97737D288FD889DAAF91A0C7A4EDA"
+
+    db = Database(settings.db_path)
+    resolver = IdentityResolver(db, settings)
+    resolver.seed()
+    guest = resolver.resolve(RequestMeta(channel="qq", external_user_id=openid))
+    assert guest.user_id == f"qq:{openid}" and guest.role == "guest"
+    logs = RawLogStore(db)
+    entry = logs.new(user_id=guest.user_id, channel="qq", scene="private", privacy="private",
+                     user_text="我明天要去面试", reply_text="加油")
+    logs.insert(entry)
+    logs.mark([entry.log_id], 1)
+    db.close()
+
+    out: list[str] = []
+    assert run_bind(str(cfg), openid, printer=out.append) == 0
+    assert any("迁移" in line for line in out)
+    s2 = load_settings(cfg)
+    assert f"qq:{openid}" in s2.users[0].bindings and "qq:834943383" in s2.users[0].bindings
+    db = Database(s2.db_path)
+    try:
+        assert IdentityResolver(db, s2).resolve(RequestMeta(channel="qq", external_user_id=openid)).user_id == "owner"
+        moved = RawLogStore(db).list(user_id="owner")
+        assert len(moved) == 1 and moved[0]["processed"] == 0  # 重新排队提取
+    finally:
+        db.close()
+    # 带平台前缀的写法（doctor 里显示的就是这种）同样可用，且不重复写入配置
+    assert run_bind(str(cfg), f"qq:{openid}", printer=out.append) == 0
+    assert cfg.read_text(encoding="utf-8").count(openid) == 1
+
+
 # ---------------------------------------------------------------------- 端到端自测
 
 

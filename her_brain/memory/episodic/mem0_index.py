@@ -14,6 +14,7 @@ import asyncio
 import copy
 import logging
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Any
@@ -112,10 +113,16 @@ class Mem0Index:
             memory = Memory.from_config(config)
         self.memory = memory
         self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="mem0")
+        # Qdrant 本地嵌入模式不是线程安全的（后台写入与对话检索会同时发生），所有调用串行执行
+        self._lock = threading.Lock()
+
+    def _locked(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return fn(*args, **kwargs)
 
     async def _run(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._pool, partial(fn, *args, **kwargs))
+        return await loop.run_in_executor(self._pool, partial(self._locked, fn, *args, **kwargs))
 
     async def add(self, rec: MemoryRecord) -> tuple[str, list[float] | None]:
         res = await self._run(
@@ -137,16 +144,30 @@ class Mem0Index:
     async def remove(self, memory_id: str) -> None:
         await self._run(self.memory.delete, memory_id)
 
-    async def search(self, user_ids: list[str], query: str, limit: int, min_score: float) -> list[tuple[str, float]]:
-        calls = [
-            self._run(self.memory.search, query, top_k=limit, filters={"user_id": uid}, threshold=min_score)
-            for uid in user_ids
-        ]
+    def _search_sync(self, user_ids: list[str], query: str, limit: int, min_score: float) -> list[tuple[str, float]]:
+        """只算一次查询向量，直接按用户查询底层向量库。
+
+        Mem0 自带的 search() 对每个用户各算一次向量，还会做 BM25 与实体加权（依赖英文 spaCy，
+        对中文没有帮助），在读路径上白白多花几十毫秒。
+        """
+        store = getattr(self.memory, "vector_store", None)
+        embedder = getattr(self.memory, "embedding_model", None)
         out: list[tuple[str, float]] = []
-        for res in await asyncio.gather(*calls):
-            for item in _results(res):
-                if item.get("id") is not None:
-                    out.append((str(item["id"]), float(item.get("score") or 0.0)))
+        if store is None or embedder is None or not hasattr(store, "search"):
+            for uid in user_ids:
+                res = self.memory.search(query, top_k=limit, filters={"user_id": uid}, threshold=min_score)
+                out += [(str(i["id"]), float(i.get("score") or 0.0)) for i in _results(res) if i.get("id") is not None]
+            return out
+        vector = embedder.embed(query, "search")
+        for uid in user_ids:
+            for point in store.search(query=query, vectors=vector, top_k=limit, filters={"user_id": uid}):
+                score = float(getattr(point, "score", 0.0) or 0.0)
+                if score >= min_score:
+                    out.append((str(point.id), score))
+        return out
+
+    async def search(self, user_ids: list[str], query: str, limit: int, min_score: float) -> list[tuple[str, float]]:
+        out = await self._run(self._search_sync, user_ids, query, limit, min_score)
         out.sort(key=lambda x: x[1], reverse=True)
         return out[:limit]
 

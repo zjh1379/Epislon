@@ -102,6 +102,7 @@ python -m her_brain doctor
 | 命令 | 作用 |
 | --- | --- |
 | `python -m her_brain setup` | 配置助手（可重复运行；`--qq`、`--astrbot`、`--docker`、`--engine`、`--yes`） |
+| `python -m her_brain bind <ID>` | 把 QQ 号或 QQ 官方机器人的 openid 绑定到主人（之前以访客身份的对话会迁移并重新提取） |
 | `python -m her_brain doctor` | 环境自检：依赖、配置、模型、llama-server、显卡、各服务、嵌入维度、AstrBot 是否接入 |
 | `python -m her_brain up` | 一键启动（`--no-llm` / `--no-embed` 跳过某个模型服务） |
 | `python -m her_brain stop` | 停止正在运行的代理及由 `up` 启动的模型服务（`git pull` 后重启前先运行；`up.bat` 会自动执行） |
