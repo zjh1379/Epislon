@@ -57,7 +57,10 @@ class PromptBuilder:
         sections: dict[str, list[str]] = {}
 
         # [3] 当前场景
-        scene_lines = [f"入口：{channel_label(scene.channel, scene.scene, scene.group_name)}", f"时间：{format_now(now_ts, self.tz)}"]
+        label = channel_label(scene.channel, scene.scene, scene.group_name)
+        if scene.uncertain:
+            label = f"{channel_label(scene.channel, 'voice')}（无法确认是私聊还是群聊）"
+        scene_lines = [f"入口：{label}", f"时间：{format_now(now_ts, self.tz)}"]
         if identity.anonymous:
             scene_lines.append("正在说话的人：身份未确认（可能不是主人）。")
         else:
@@ -126,7 +129,10 @@ def split_entry_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str,
 
 
 def last_user_text(messages: list[dict[str, Any]]) -> str:
+    """最后一条用户消息的文字（去掉入口附加的提醒块），用于记录日志、检索记忆和提取事实。"""
+    from ..identity.metadata import strip_reminders
+
     for m in reversed(messages):
         if m.get("role") == "user":
-            return content_to_text(m.get("content")).strip()
+            return strip_reminders(content_to_text(m.get("content")))
     return ""

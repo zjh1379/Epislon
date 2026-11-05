@@ -57,7 +57,8 @@ class FakeEvent:
 def _install_astrbot_stubs(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     api = types.ModuleType("astrbot.api")
     api.AstrBotConfig = dict  # type: ignore[attr-defined]
-    api.logger = types.SimpleNamespace(warning=lambda *a, **k: None, debug=lambda *a, **k: None)  # type: ignore[attr-defined]
+    api.logger = types.SimpleNamespace(  # type: ignore[attr-defined]
+        warning=lambda *a, **k: None, debug=lambda *a, **k: None, info=lambda *a, **k: None)
     event = types.ModuleType("astrbot.api.event")
     event.AstrMessageEvent = FakeEvent  # type: ignore[attr-defined]
     event.filter = types.SimpleNamespace(on_llm_request=lambda **kw: (lambda fn: fn))  # type: ignore[attr-defined]
@@ -98,6 +99,27 @@ async def test_astrbot_plugin_marker_roundtrip(monkeypatch) -> None:  # type: ig
     meta, messages = parse_request_meta({"messages": [{"role": "system", "content": req.system_prompt}]}, None, {})
     assert (meta.channel, meta.scene, meta.platform) == ("tg", "private", "telegram")
     assert messages[0]["content"] == "原有提示词"
+
+
+async def test_astrbot_plugin_never_breaks_astrbot(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _install_astrbot_stubs(monkeypatch)
+    infos: list[str] = []
+    sys.modules["astrbot.api"].logger = types.SimpleNamespace(  # type: ignore[attr-defined]
+        warning=lambda *a, **k: infos.append(("warn", a[0])), debug=lambda *a, **k: None,
+        info=lambda *a, **k: infos.append(("info", a[0])))
+    plugin_mod = _load(ROOT / "integrations/astrbot_plugin_her_bridge/main.py", "her_bridge_plugin3")
+    plugin = plugin_mod.HerBridge(context=None, config={})
+
+    class Broken(FakeEvent):
+        def get_sender_id(self) -> str:
+            raise RuntimeError("平台适配器出错")
+
+    req = ProviderRequest(prompt="hi", system_prompt="原样")
+    await plugin.attach_meta(Broken("aiocqhttp", True, "1", "a"), req)
+    assert req.system_prompt == "原样" and infos[0][0] == "warn"
+    for _ in range(2):
+        await plugin.attach_meta(FakeEvent("aiocqhttp", True, "1", "a"), ProviderRequest())
+    assert [kind for kind, _ in infos].count("info") == 1  # 只提示一次
 
 
 async def test_astrbot_plugin_respects_provider_filter(monkeypatch) -> None:  # type: ignore[no-untyped-def]

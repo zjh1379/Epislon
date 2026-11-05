@@ -129,11 +129,12 @@ class IdentityResolver:
 
     def build_scene(self, meta: RequestMeta, identity: Identity) -> Scene:
         scene = meta.scene or "private"
-        if identity.anonymous or scene == "group":
+        if identity.anonymous or scene == "group" or meta.scene_uncertain:
             access = PUBLIC
         else:
             access = PRIVATE
-        write_privacy = PUBLIC if scene == "group" else PRIVATE
+        # 场合不确定时写入标为私密：宁可在私聊里少用一条记忆，也不能把私聊内容当公开信息
+        write_privacy = PUBLIC if scene == "group" and not meta.scene_uncertain else PRIVATE
         return Scene(
             channel=meta.channel,
             scene=scene,
@@ -142,6 +143,7 @@ class IdentityResolver:
             speaker_verified=meta.speaker_verified,
             access=access,
             write_privacy=write_privacy,
+            uncertain=meta.scene_uncertain,
         )
 
     # ------------------------------------------------------------------ 管理

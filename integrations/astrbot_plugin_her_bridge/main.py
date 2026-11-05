@@ -23,11 +23,12 @@ DEFAULT_ALIASES = {
 }
 
 
-@register("astrbot_plugin_her_bridge", "Epislon", "为大脑代理附加身份与场合元数据", "0.1.0")
+@register("astrbot_plugin_her_bridge", "Epislon", "为大脑代理附加身份与场合元数据", "0.1.1")
 class HerBridge(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
         self.config = config or {}
+        self._announced = False
         self.aliases = dict(DEFAULT_ALIASES)
         raw = self.config.get("platform_aliases") or ""
         if raw:
@@ -49,8 +50,24 @@ class HerBridge(Star):
 
     @filter.on_llm_request()
     async def attach_meta(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
-        if not self._provider_enabled(event):
+        try:
+            if not self._provider_enabled(event):
+                logger.debug("[her_bridge] 当前提供商不在 enabled_provider_ids 中，跳过")
+                return
+            meta = self._build_meta(event)
+        except Exception as exc:  # noqa: BLE001 - 插件出错不能影响 AstrBot 正常回复
+            logger.warning(f"[her_bridge] 生成身份元数据失败：{exc}")
             return
+        marker = "<her-meta>" + json.dumps(meta, ensure_ascii=False) + "</her-meta>"
+        req.system_prompt = f"{req.system_prompt}\n{marker}" if req.system_prompt else marker
+        if not self._announced:
+            self._announced = True
+            logger.info(
+                f"[her_bridge] 已为大脑代理附加身份：{meta['channel']}/{meta['scene']}/{meta['external_user_id']}"
+                "（之后不再重复提示）"
+            )
+
+    def _build_meta(self, event: AstrMessageEvent) -> dict:
         platform = event.get_platform_name()
         group_id = event.get_group_id() or ""
         meta = {
@@ -67,5 +84,4 @@ class HerBridge(Star):
                 name = getattr(group, "group_name", None) if group else None
                 if name:
                     meta["group_name"] = name
-        marker = "<her-meta>" + json.dumps(meta, ensure_ascii=False) + "</her-meta>"
-        req.system_prompt = f"{req.system_prompt}\n{marker}" if req.system_prompt else marker
+        return meta

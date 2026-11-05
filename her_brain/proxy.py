@@ -325,6 +325,8 @@ class ChatService:
                 "group_name": scene.group_name,
                 "interrupted": interrupted,
                 "speaker_verified": scene.speaker_verified,
+                "meta_sources": turn.meta.sources,
+                "scene_uncertain": scene.uncertain,
             },
         )
         if not ident.anonymous:

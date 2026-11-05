@@ -177,6 +177,37 @@ async def test_api_keys(make_settings, fake: FakeLLM) -> None:  # type: ignore[n
         await svc.close()
 
 
+async def test_astrbot_without_plugin_uses_identifier_safely(make_settings, fake: FakeLLM) -> None:  # type: ignore[no-untyped-def]
+    """插件未生效、但 AstrBot 打开了“用户识别”：能认出主人，但分不清私聊群聊，只读公开记忆。"""
+    from her_brain.app import create_app
+    from her_brain.identity.models import PRIVATE, PUBLIC
+    from her_brain.services import Services, Transports
+
+    settings = make_settings(api_keys=[{"key": "sk-her-astrbot", "channel": "qq"}])
+    svc = Services(settings, transports=Transports(upstream=fake.transport()))
+    svc.profiles.add_entry("owner", {"text": "私密：最近在看心理医生", "privacy": PRIVATE})
+    svc.profiles.add_entry("owner", {"text": "喜欢打篮球", "privacy": PUBLIC})
+    app = create_app(settings, svc, run_worker=False)
+    app.state.services = svc
+    content = [{"type": "text", "text": "晚上好"},
+               {"type": "text", "text": "<system_reminder>User ID: 10001, Nickname: 小明\n"
+                                        "Current datetime: 2026-11-05 21:00 (CST)</system_reminder>"}]
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://b") as c:
+            r = await c.post("/v1/chat/completions", headers={"Authorization": "Bearer sk-her-astrbot"},
+                             json={"model": "her", "messages": [{"role": "user", "content": content}]})
+            assert r.status_code == 200
+        system = fake.chat_requests[-1]["messages"][0]["content"]
+        assert "小明（你的主人）" in system and "无法确认是私聊还是群聊" in system and "场合：公开" in system
+        assert "喜欢打篮球" in system and "心理医生" not in system
+        log = svc.rawlog.list()[0]
+        assert log["user_id"] == "owner" and log["user_text"] == "晚上好"  # 提醒块不进日志
+        assert log["privacy"] == PRIVATE and log["meta"]["scene_uncertain"] is True
+        assert log["meta"]["meta_sources"] == ["api_key", "astrbot_identifier"]
+    finally:
+        await svc.close()
+
+
 async def test_rejected_requests_are_logged(make_settings, fake: FakeLLM, caplog) -> None:  # type: ignore[no-untyped-def]
     """排查“发了消息没回复”：被拒绝的请求要在代理窗口里打印原因，并能在 /admin/stats 看到。"""
     from her_brain.app import create_app

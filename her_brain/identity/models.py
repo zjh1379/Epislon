@@ -24,6 +24,9 @@ class RequestMeta:
     no_memory: bool = False  # 记录原始日志，但不从中提取记忆
     no_log: bool = False  # 完全不落库
     sources: list[str] = field(default_factory=list)  # 元数据来自哪里，便于排查
+    # 知道是谁，却没有任何来源说明是私聊还是群聊（例如只靠 AstrBot 的“用户识别”）。
+    # 此时按保守模式处理：只读公开记忆，新写入一律标为私密
+    scene_uncertain: bool = False
 
 
 @dataclass
@@ -55,6 +58,8 @@ class Scene:
     access: str
     # 本轮对话写入日志时标注的私密度
     write_privacy: str
+    # 无法确认是私聊还是群聊（见 RequestMeta.scene_uncertain）
+    uncertain: bool = False
 
     @property
     def allowed_privacy(self) -> set[str]:

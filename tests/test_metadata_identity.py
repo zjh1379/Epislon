@@ -75,6 +75,38 @@ def test_soft_switch_and_bools() -> None:
     assert parse_bool("开启") is True and parse_bool("关闭") is False and parse_bool(None) is None
 
 
+ASTRBOT_USER_CONTENT = [
+    {"type": "text", "text": "我明天要去面试"},
+    {"type": "text", "text": "<system_reminder>User ID: 10001, Nickname: 小明\n"
+                             "Current datetime: 2026-11-05 10:00 (CST), Weekday: Thursday</system_reminder>"},
+]
+
+
+def test_astrbot_identifier_fallback_is_conservative() -> None:
+    key = ApiKeyConfig(key="k", channel="qq")
+    body = {"messages": [{"role": "user", "content": ASTRBOT_USER_CONTENT}]}
+    meta, _ = parse_request_meta(body, key, ALIASES)
+    assert (meta.external_user_id, meta.user_name) == ("10001", "小明")
+    assert meta.sources == ["api_key", "astrbot_identifier"]
+    assert meta.scene_uncertain  # 分不清私聊群聊
+
+    group = [dict(ASTRBOT_USER_CONTENT[0]),
+             {"type": "text", "text": "<system_reminder>User ID: 10001, Nickname: 小明\nGroup name: 测试群</system_reminder>"}]
+    meta, _ = parse_request_meta({"messages": [{"role": "user", "content": group}]}, key, ALIASES)
+    assert meta.scene == "group" and meta.group_name == "测试群" and not meta.scene_uncertain
+
+    marker = '<her-meta>{"platform": "aiocqhttp", "scene": "private", "external_user_id": "42"}</her-meta>'
+    body = {"messages": [{"role": "system", "content": marker}, {"role": "user", "content": ASTRBOT_USER_CONTENT}]}
+    meta, _ = parse_request_meta(body, key, ALIASES)
+    assert meta.external_user_id == "42" and not meta.scene_uncertain  # 插件标记优先
+
+
+def test_strip_reminders_from_user_text() -> None:
+    from her_brain.prompt.builder import last_user_text
+
+    assert last_user_text([{"role": "user", "content": ASTRBOT_USER_CONTENT}]) == "我明天要去面试"
+
+
 def test_identity_resolution(services) -> None:  # type: ignore[no-untyped-def]
     r = services.resolver
     owner = r.resolve(RequestMeta(channel="qq", external_user_id="10001"))

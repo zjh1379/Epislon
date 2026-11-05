@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import shutil
 import sqlite3
 import subprocess
@@ -223,8 +224,15 @@ def check_astrbot(settings: Settings) -> list[Check]:
                WHERE channel = 'qq' GROUP BY user_id, scene ORDER BY last DESC"""
         )]
         owners = {r["user_id"] for r in conn.execute("SELECT user_id FROM users WHERE role = 'owner'")}
+        latest = conn.execute(
+            "SELECT meta FROM raw_log WHERE channel = 'qq' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
     finally:
         conn.close()
+    try:
+        latest_meta = json.loads(latest["meta"]) if latest else {}
+    except (TypeError, ValueError):
+        latest_meta = {}
     if not rows:
         return [Check("info", "AstrBot 接入", "还没有收到来自 QQ 的消息",
                       "在 AstrBot 新增 OpenAI 兼容提供商指向本代理并设为默认，然后给机器人发条私聊")]
@@ -233,9 +241,19 @@ def check_astrbot(settings: Settings) -> list[Check]:
     summary = "；".join(f"{r['user_id']} {r['scene']} {r['n']} 条" for r in rows[:6])
     out.append(Check("ok", "AstrBot 接入", f"已收到 QQ 消息，最近一条在 {_ago(last)}：{summary}"))
     users = {r["user_id"] for r in rows}
+    sources = latest_meta.get("meta_sources") or []
+    if "marker" in sources:
+        out.append(Check("ok", "AstrBot 插件", "最近一条 QQ 消息的身份由插件提供"))
+    elif "astrbot_identifier" in sources:
+        out.append(Check("warn", "AstrBot 插件", "插件未生效，最近一条 QQ 消息的身份来自 AstrBot 的“用户识别”",
+                         "能认出你，但分不清私聊和群聊，因此只读公开记忆。插件生效后恢复正常"))
     if any(u.startswith("anon:") for u in users):
-        out.append(Check("warn", "AstrBot 插件", "有 QQ 消息拿不到发送者（anon:qq）",
-                         "确认 astrbot_plugin_her_bridge 已安装并启用，且 enabled_provider_ids 包含本代理的提供商"))
+        out.append(Check(
+            "warn", "AstrBot 插件", "有 QQ 消息拿不到发送者（anon:qq），插件没有生效",
+            "① 复制插件后需重启 AstrBot；② 在 AstrBot 管理面板「插件」里确认 astrbot_plugin_her_bridge 已启用，"
+            "启动日志里没有它的报错；插件生效后，收到第一条消息时 AstrBot 控制台会打印“[her_bridge] 已为大脑代理附加身份”；"
+            "③ 若在会话管理里限制了插件启用范围，需把它加进去；④ 临时退路：在 AstrBot 配置里打开「用户识别」",
+        ))
     if not users & owners:
         guests = sorted(u for u in users if u.startswith("qq:"))
         if guests:

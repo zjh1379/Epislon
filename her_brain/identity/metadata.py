@@ -21,6 +21,32 @@ MARKER_RE = re.compile(r"<her-meta>\s*(\{.*?\})\s*</her-meta>", re.S)
 SHORT_MARKER_RE = re.compile(r"\[\[her:([^\]]*)\]\]")
 # 入口在系统提示词里附加的思考开关（例如枫云会拼上 /no_think），由代理统一控制
 SOFT_SWITCH_RE = re.compile(r"(?<![A-Za-z0-9_/])/(?:no_think|think)(?![A-Za-z0-9_])")
+# AstrBot 附加在用户消息后的提醒块（当前时间、用户识别、群名称等），不是用户说的话
+SYSTEM_REMINDER_RE = re.compile(r"<system_reminder>(.*?)</system_reminder>", re.S)
+_REMINDER_USER_RE = re.compile(r"User ID:\s*([^,\n]+?)\s*,\s*Nickname:\s*([^\n]*)")
+_REMINDER_GROUP_RE = re.compile(r"Group name:\s*([^\n]+)")
+
+
+def strip_reminders(text: str) -> str:
+    return SYSTEM_REMINDER_RE.sub("", text).strip()
+
+
+def reminder_identity(messages: list[dict[str, Any]]) -> dict[str, Any]:
+    """从最后一条用户消息里的 AstrBot 提醒块读取“用户识别”与“显示群名称”的信息。"""
+    from ..textutil import content_to_text
+
+    for msg in reversed(messages):
+        if msg.get("role") != "user":
+            continue
+        out: dict[str, Any] = {}
+        for block in SYSTEM_REMINDER_RE.findall(content_to_text(msg.get("content"))):
+            if m := _REMINDER_USER_RE.search(block):
+                out["external_user_id"], out["user_name"] = m.group(1).strip(), m.group(2).strip()
+            if m := _REMINDER_GROUP_RE.search(block):
+                out["group_name"] = m.group(1).strip()
+                out["scene"] = "group"
+        return out
+    return {}
 
 SCENE_ALIASES = {
     "private": "private",
@@ -158,21 +184,34 @@ def parse_request_meta(
     aliases: dict[str, str],
 ) -> tuple[RequestMeta, list[dict[str, Any]]]:
     meta = RequestMeta()
+    scene_told = False  # 是否有来源明确说明了私聊/群聊/语音
     if key_cfg is not None:
         _apply(meta, {"channel": key_cfg.channel, "scene": key_cfg.scene, "mode": key_cfg.mode}, aliases, "api_key")
+        scene_told = key_cfg.scene is not None
 
     messages, markers = strip_markers(list(body.get("messages") or []))
     for data in markers:
         _apply(meta, data, aliases, "marker")
-
-    # OpenAI 规范里的 user 字段也能当作外部用户 ID 使用
-    if body.get("user") and not meta.external_user_id:
-        meta.external_user_id = str(body["user"])
+        scene_told = scene_told or "scene" in data or bool(data.get("group_id"))
 
     for field_name in ("metadata", "her"):
         data = body.get(field_name)
         if isinstance(data, dict):
             _apply(meta, data, aliases, field_name)
+            scene_told = scene_told or "scene" in data or bool(data.get("group_id"))
+
+    # 退路：没有插件标记时，用 AstrBot“用户识别”附带的 User ID，或 OpenAI 规范里的 user 字段
+    if not meta.external_user_id:
+        reminder = reminder_identity(messages)
+        if reminder.get("external_user_id"):
+            _apply(meta, reminder, aliases, "astrbot_identifier")
+            scene_told = scene_told or "scene" in reminder
+        elif body.get("user"):
+            meta.external_user_id = str(body["user"])
+            meta.sources.append("user_field")
+
+    # 知道是谁、却没人说明场合时，不能想当然地当成私聊（语音入口本身就是私人场合）
+    meta.scene_uncertain = bool(meta.external_user_id) and not scene_told and meta.channel != "voice"
 
     if not meta.scene:
         if meta.channel == "voice":

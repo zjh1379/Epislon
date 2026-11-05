@@ -19,7 +19,18 @@ AstrBot/data/plugins/astrbot_plugin_her_bridge/
 └── _conf_schema.json
 ```
 
-重启 AstrBot，在管理面板「插件」里能看到“为大脑代理附加身份与场合元数据”。
+**复制后必须重启 AstrBot**。在管理面板「插件」里应能看到 `astrbot_plugin_her_bridge`（为大脑代理附加身份与场合元数据），并且处于启用状态。收到第一条消息时，AstrBot 控制台会打印一行：
+
+```
+[her_bridge] 已为大脑代理附加身份：qq/private/你的QQ号（之后不再重复提示）
+```
+
+没看到这一行时，按顺序检查：
+
+- AstrBot 启动日志里有没有这个插件的加载报错；
+- 插件是否被禁用；
+- 会话管理里是否限制了插件的启用范围；
+- 插件配置 `enabled_provider_ids` 是否填了别的提供商。
 
 插件在每次请求模型前，把下面这段标记追加到系统提示词末尾：
 
@@ -65,6 +76,14 @@ curl http://127.0.0.1:8000/admin/logs?limit=1
 curl -X POST http://127.0.0.1:8000/admin/identities -H 'content-type: application/json' -d '{"platform": "qq", "external_id": "123456", "user_id": "owner", "move_logs": true}'
 ```
 
-## 无法安装插件时
+## 插件未生效时
 
-不装插件也能用：提供商的 API Key 填 `sk-her-astrbot`，代理会按 Key 认出入口是 QQ。但拿不到发送者，所有人都会被当作匿名访客：只读公开信息，也不写入记忆。所以建议安装插件。
+| 情况 | 效果 |
+| --- | --- |
+| 插件正常 | 认出是谁、私聊还是群聊；私聊可用私密记忆，群聊只用公开记忆 |
+| 没有插件，但打开了 AstrBot 配置里的「用户识别」 | 能从 AstrBot 附加的 `User ID` 认出是谁，但分不清私聊和群聊。为了不在群里说漏私事，按保守模式处理：只读公开记忆，新写入一律标为私密 |
+| 两者都没有 | 只能按 API Key 认出入口是 QQ，所有人都当作匿名访客：只读公开信息，不写入记忆 |
+
+`python -m her_brain doctor` 会显示最近一条 QQ 消息的身份来自哪里。
+
+AstrBot 默认开启的“附加当前时间”等提醒内容（`<system_reminder>`）不会被当作用户说的话写入日志或用于检索。
